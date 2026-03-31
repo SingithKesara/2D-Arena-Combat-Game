@@ -4,179 +4,185 @@ using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
-/// Drives all in-game UI:
-///   • Two health bars (one left-aligned, one right-aligned like SF/MK)
-///   • Centered 99-second countdown timer
-///   • Round intro / FIGHT! / WIN text overlay
-///   • Win icons (dots below each name)
-///   • Match-over panel with rematch button
+/// Drives all in-game HUD elements.
+/// References wired directly by AutoSetup so no timing issues.
 /// </summary>
 public class UIManager : MonoBehaviour
 {
-    // ─────────────── Inspector references ────────────────────
     [Header("Health Bars")]
-    public Slider healthBarP1;     // fills left-to-right  (pivot left)
-    public Slider healthBarP2;     // fills right-to-left  (pivot right, value inverted)
-    public Image  healthFillP1;
-    public Image  healthFillP2;
+    public Slider           healthBarP1;
+    public Slider           healthBarP2;
+    public Image            healthFillP1;
+    public Image            healthFillP2;
+
+    [Header("HP Text Labels")]
+    public TextMeshProUGUI  hpTextP1;
+    public TextMeshProUGUI  hpTextP2;
+
+    [Header("Direct Health Manager References")]
+    public HealthManager    healthManagerP1;
+    public HealthManager    healthManagerP2;
 
     [Header("Timer")]
-    public TextMeshProUGUI timerText;
+    public TextMeshProUGUI  timerText;
 
-    [Header("Round / Announcement Text")]
-    public TextMeshProUGUI announcementText;
+    [Header("Round / Announcement")]
+    public TextMeshProUGUI  announcementText;
 
-    [Header("Score / Round Wins")]
-    public TextMeshProUGUI p1ScoreText;
-    public TextMeshProUGUI p2ScoreText;
+    [Header("Score")]
+    public TextMeshProUGUI  p1ScoreText;
+    public TextMeshProUGUI  p2ScoreText;
 
     [Header("Match Over Panel")]
-    public GameObject matchOverPanel;
-    public TextMeshProUGUI resultText;
-    public Button rematchButton;
-    public Button quitButton;
+    public GameObject       matchOverPanel;
+    public TextMeshProUGUI  resultText;
+    public Button           rematchButton;
+    public Button           quitButton;
 
-    [Header("Color Theming")]
-    public Color healthHighColor = new Color(0.1f, 0.9f, 0.1f);
-    public Color healthMidColor  = Color.yellow;
-    public Color healthLowColor  = Color.red;
+    private static readonly Color ColHigh = new Color(0.08f, 0.90f, 0.15f);
+    private static readonly Color ColMid  = new Color(1.00f, 0.82f, 0.08f);
+    private static readonly Color ColLow  = new Color(0.92f, 0.10f, 0.08f);
 
-    // ─────────────── Private ─────────────────────────────────
-    private HealthManager _hmP1;
-    private HealthManager _hmP2;
     private GameStateManager _gsm;
+    private Coroutine        _annCo;
 
-    private Coroutine _announceCo;
-
-    // ─────────────── Unity lifecycle ─────────────────────────
-    private void Start()
+    // ── Awake: subscribe before any Start() runs ──────────────
+    private void Awake()
     {
-        _gsm = GameStateManager.Instance;
+        // Wire from direct references (assigned by AutoSetup)
+        if (healthManagerP1 != null)
+            healthManagerP1.OnHealthChanged += (c, m) => RefreshHealth(1, c, m);
+        if (healthManagerP2 != null)
+            healthManagerP2.OnHealthChanged += (c, m) => RefreshHealth(2, c, m);
 
-        // Get health managers from the game state manager's player refs
-        if (_gsm != null)
-        {
-            _hmP1 = _gsm.player1?.GetComponent<HealthManager>();
-            _hmP2 = _gsm.player2?.GetComponent<HealthManager>();
-        }
+        // Buttons
+        rematchButton?.onClick.AddListener(() => GameStateManager.Instance?.RestartMatch());
+        quitButton?.onClick.AddListener(Application.Quit);
 
-        // Subscribe to events
-        if (_gsm != null)
-        {
-            _gsm.OnTimerUpdate    += UpdateTimer;
-            _gsm.OnRoundIntroText += ShowAnnouncement;
-            _gsm.OnScoreUpdate    += UpdateScore;
-            _gsm.OnMatchResult    += ShowMatchResult;
-            _gsm.OnRoundStart     += OnRoundStart;
-            _gsm.OnRoundEnd       += OnRoundEnd;
-        }
-
-        if (_hmP1 != null) _hmP1.OnHealthChanged += UpdateHealthP1;
-        if (_hmP2 != null) _hmP2.OnHealthChanged += UpdateHealthP2;
-
-        // Initialise health bars
-        UpdateHealthP1(_hmP1 != null ? _hmP1.CurrentHealth : 100,
-                       _hmP1 != null ? _hmP1.maxHealth : 100);
-        UpdateHealthP2(_hmP2 != null ? _hmP2.CurrentHealth : 100,
-                       _hmP2 != null ? _hmP2.maxHealth : 100);
-
-        // Rematch / quit buttons
-        if (rematchButton != null) rematchButton.onClick.AddListener(() => _gsm?.RestartMatch());
-        if (quitButton    != null) quitButton.onClick.AddListener(Application.Quit);
-
-        // Hide overlay panels at start
         if (matchOverPanel != null) matchOverPanel.SetActive(false);
         if (announcementText != null) announcementText.text = "";
     }
 
-    private void OnDestroy()
+    private void Start()
     {
+        _gsm = GameStateManager.Instance;
         if (_gsm != null)
         {
-            _gsm.OnTimerUpdate    -= UpdateTimer;
-            _gsm.OnRoundIntroText -= ShowAnnouncement;
-            _gsm.OnScoreUpdate    -= UpdateScore;
-            _gsm.OnMatchResult    -= ShowMatchResult;
-            _gsm.OnRoundStart     -= OnRoundStart;
-            _gsm.OnRoundEnd       -= OnRoundEnd;
+            _gsm.OnTimerUpdate    += RefreshTimer;
+            _gsm.OnRoundIntroText += ShowAnnouncement;
+            _gsm.OnScoreUpdate    += RefreshScore;
+            _gsm.OnMatchResult    += ShowMatchOver;
+            _gsm.OnRoundStart     += OnRoundStart;
         }
-        if (_hmP1 != null) _hmP1.OnHealthChanged -= UpdateHealthP1;
-        if (_hmP2 != null) _hmP2.OnHealthChanged -= UpdateHealthP2;
+
+        // Show initial full bars
+        int maxP1 = healthManagerP1 != null ? healthManagerP1.maxHealth : 100;
+        int maxP2 = healthManagerP2 != null ? healthManagerP2.maxHealth : 100;
+        RefreshHealth(1, maxP1, maxP1);
+        RefreshHealth(2, maxP2, maxP2);
+        RefreshTimer(99f);
+        RefreshScore(0, 0);
     }
 
-    // ─────────────── Health bars ─────────────────────────────
-    private void UpdateHealthP1(int current, int max)
+    private void OnDestroy()
     {
-        if (healthBarP1 == null) return;
-        float t = (float)current / max;
-        healthBarP1.value = t;
-        if (healthFillP1 != null) healthFillP1.color = HealthColor(t);
+        if (healthManagerP1 != null)
+            healthManagerP1.OnHealthChanged -= (c, m) => RefreshHealth(1, c, m);
+        if (healthManagerP2 != null)
+            healthManagerP2.OnHealthChanged -= (c, m) => RefreshHealth(2, c, m);
+        if (_gsm != null)
+        {
+            _gsm.OnTimerUpdate    -= RefreshTimer;
+            _gsm.OnRoundIntroText -= ShowAnnouncement;
+            _gsm.OnScoreUpdate    -= RefreshScore;
+            _gsm.OnMatchResult    -= ShowMatchOver;
+            _gsm.OnRoundStart     -= OnRoundStart;
+        }
     }
 
-    private void UpdateHealthP2(int current, int max)
+    // ── Health bars ───────────────────────────────────────────
+    private void RefreshHealth(int idx, int current, int max)
     {
-        if (healthBarP2 == null) return;
-        float t = (float)current / max;
-        // P2 bar fills from right; we just invert the value
-        healthBarP2.value = t;
-        if (healthFillP2 != null) healthFillP2.color = HealthColor(t);
+        float t = max > 0 ? (float)current / max : 0f;
+        Color c = HealthColour(t);
+
+        if (idx == 1)
+        {
+            if (healthBarP1  != null) healthBarP1.value  = t;
+            if (healthFillP1 != null) healthFillP1.color  = c;
+            if (hpTextP1     != null) hpTextP1.text       = current.ToString();
+        }
+        else
+        {
+            if (healthBarP2  != null) healthBarP2.value  = t;
+            if (healthFillP2 != null) healthFillP2.color  = c;
+            if (hpTextP2     != null) hpTextP2.text       = current.ToString();
+        }
     }
 
-    private Color HealthColor(float t)
+    private static Color HealthColour(float t)
     {
-        if (t > 0.5f) return Color.Lerp(healthMidColor,  healthHighColor, (t - 0.5f) * 2f);
-        else          return Color.Lerp(healthLowColor,   healthMidColor,  t * 2f);
+        if (t > 0.5f) return Color.Lerp(ColMid, ColHigh, (t - 0.5f) * 2f);
+        return Color.Lerp(ColLow, ColMid, t * 2f);
     }
 
-    // ─────────────── Timer ────────────────────────────────────
-    private void UpdateTimer(float seconds)
+    // ── Timer ─────────────────────────────────────────────────
+    private void RefreshTimer(float seconds)
     {
         if (timerText == null) return;
         int s = Mathf.CeilToInt(seconds);
-        timerText.text = s.ToString();
-
-        // Pulse red when under 10 seconds
-        timerText.color = (s <= 10) ? Color.red : Color.white;
+        timerText.text  = s.ToString();
+        timerText.color = s <= 10 ? Color.red : Color.white;
+        float pulse = s <= 10 ? (1f + 0.12f * Mathf.Sin(Time.time * 8f)) : 1f;
+        timerText.transform.localScale = Vector3.one * pulse;
     }
 
-    // ─────────────── Announcement overlay ────────────────────
+    // ── Announcement ─────────────────────────────────────────
     private void ShowAnnouncement(string msg)
     {
         if (announcementText == null) return;
-        if (_announceCo != null) StopCoroutine(_announceCo);
-        announcementText.text = msg;
-
-        // Auto-clear after a short period unless msg is empty
+        if (_annCo != null) StopCoroutine(_annCo);
+        announcementText.text  = msg;
+        announcementText.color = GetAnnouncementColour(msg);
         if (!string.IsNullOrEmpty(msg))
-            _announceCo = StartCoroutine(ClearAnnouncement(2.5f));
+            _annCo = StartCoroutine(FadeAnnouncement(2f));
     }
 
-    private IEnumerator ClearAnnouncement(float delay)
+    private static Color GetAnnouncementColour(string m)
     {
-        yield return new WaitForSeconds(delay);
-        if (announcementText != null) announcementText.text = "";
+        if (m.Contains("FIGHT"))  return new Color(1f, 0.3f, 0.1f);
+        if (m.Contains("WINS"))   return Color.yellow;
+        if (m.Contains("TIME"))   return new Color(1f, 0.6f, 0f);
+        return Color.white;
     }
 
-    // ─────────────── Score display ────────────────────────────
-    private void UpdateScore(int p1Wins, int p2Wins)
+    private IEnumerator FadeAnnouncement(float stay)
     {
-        if (p1ScoreText != null) p1ScoreText.text = new string('●', p1Wins);
-        if (p2ScoreText != null) p2ScoreText.text = new string('●', p2Wins);
+        yield return new WaitForSeconds(stay);
+        float t = 0f;
+        Color start = announcementText.color;
+        while (t < 0.5f)
+        {
+            t += Time.deltaTime;
+            announcementText.color = new Color(start.r, start.g, start.b, 1f - t / 0.5f);
+            yield return null;
+        }
+        announcementText.text = "";
     }
 
-    // ─────────────── Round events ─────────────────────────────
+    // ── Score ────────────────────────────────────────────────
+    private void RefreshScore(int p1, int p2)
+    {
+        if (p1ScoreText != null) p1ScoreText.text = new string('●', p1) + new string('○', Mathf.Max(0, 2 - p1));
+        if (p2ScoreText != null) p2ScoreText.text = new string('○', Mathf.Max(0, 2 - p2)) + new string('●', p2);
+    }
+
     private void OnRoundStart()
     {
         if (timerText != null) timerText.gameObject.SetActive(true);
     }
 
-    private void OnRoundEnd()
-    {
-        // Timer keeps showing but stops updating (GameStateManager stops calling OnTimerUpdate)
-    }
-
-    // ─────────────── Match over ───────────────────────────────
-    private void ShowMatchResult(string result)
+    private void ShowMatchOver(string result)
     {
         if (matchOverPanel != null) matchOverPanel.SetActive(true);
         if (resultText     != null) resultText.text = result;

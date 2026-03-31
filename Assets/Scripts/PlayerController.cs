@@ -1,18 +1,15 @@
 using UnityEngine;
-using UnityEngine.InputSystem;   // ← New Input System; UnityEngine.Input is DISABLED in this project
+using UnityEngine.InputSystem;
 
 /// <summary>
-/// Brawlhalla-style player controller.
-/// Uses Keyboard.current (New Input System) — no legacy Input.GetKey calls.
-///
-/// Player 1: A/D move | W or Space jump | J light attack | K heavy attack
-/// Player 2: Numpad4/6 move | Numpad8 jump | Numpad0 light | NumpadEnter heavy
+/// Brawlhalla-style player controller — New Input System only.
+/// Player 1: A/D move | W or Space jump | J light | K heavy
+/// Player 2: Numpad 4/6 move | Numpad 8 jump | Numpad 0 light | NumpadEnter heavy
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Animator))]
 public class PlayerController : MonoBehaviour
 {
-    // ─── Inspector ────────────────────────────────────────────
     [Header("Movement")]
     public float walkSpeed     = 8f;
     public float runSpeed      = 13f;
@@ -22,18 +19,17 @@ public class PlayerController : MonoBehaviour
 
     [Header("Ground Detection")]
     public Transform groundCheck;
-    public float     groundCheckRadius = 0.18f;
+    public float     groundCheckRadius = 0.22f;
     public LayerMask groundLayer;
 
     [Header("Identity")]
-    public int playerIndex = 1;   // 1 or 2
+    public int playerIndex = 1;
 
-    // ─── Runtime state (read by other scripts) ────────────────
+    // Runtime (read by other scripts)
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
     [HideInInspector] public bool isDead;
 
-    // ─── Private ──────────────────────────────────────────────
     private Vector2       _move;
     private int           _jumpsLeft;
     private const int     MAX_JUMPS = 2;
@@ -43,7 +39,6 @@ public class PlayerController : MonoBehaviour
     private Animator      _anim;
     private CombatSystem  _combat;
 
-    // Animator hash cache
     private static readonly int H_Moving   = Animator.StringToHash("isMoving");
     private static readonly int H_Running  = Animator.StringToHash("isRunning");
     private static readonly int H_Grounded = Animator.StringToHash("isGrounded");
@@ -52,7 +47,6 @@ public class PlayerController : MonoBehaviour
     private static readonly int H_Hit      = Animator.StringToHash("hit");
     private static readonly int H_Death    = Animator.StringToHash("death");
 
-    // ─── Unity lifecycle ──────────────────────────────────────
     private void Awake()
     {
         _rb     = GetComponent<Rigidbody2D>();
@@ -62,6 +56,8 @@ public class PlayerController : MonoBehaviour
         _rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
+        // *** Initialize jumps so first frame has correct count ***
+        _jumpsLeft   = MAX_JUMPS;
         _facingRight = (playerIndex == 1);
         ApplyFacing();
     }
@@ -81,60 +77,47 @@ public class PlayerController : MonoBehaviour
         SyncAnimator();
     }
 
-    // ─── Input (New Input System — Keyboard.current) ──────────
     private void ReadInput()
     {
         var kb = Keyboard.current;
-        if (kb == null) return;   // no keyboard connected
+        if (kb == null) return;
 
         float x = 0f, y = 0f;
 
         if (playerIndex == 1)
         {
-            // ── Movement ──────────────────────────────
             if (kb.aKey.isPressed) x -= 1f;
             if (kb.dKey.isPressed) x += 1f;
-            if (kb.wKey.isPressed) y =  1f;
+            if (kb.wKey.isPressed || kb.spaceKey.isPressed) y = 1f;
             if (kb.sKey.isPressed) y = -1f;
 
-            // ── Jump (wasPressed = fires once on the frame the key goes down) ──
-            if (kb.wKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame)
-                TryJump();
-
-            // ── Attacks ───────────────────────────────
+            if (kb.wKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame) TryJump();
             if (kb.jKey.wasPressedThisFrame) TryLightAttack();
             if (kb.kKey.wasPressedThisFrame) TryHeavyAttack();
         }
-        else // Player 2
+        else
         {
-            // ── Movement ──────────────────────────────
             if (kb.numpad4Key.isPressed) x -= 1f;
             if (kb.numpad6Key.isPressed) x += 1f;
             if (kb.numpad8Key.isPressed) y =  1f;
             if (kb.numpad5Key.isPressed) y = -1f;
 
-            // ── Jump ──────────────────────────────────
             if (kb.numpad8Key.wasPressedThisFrame) TryJump();
-
-            // ── Attacks ───────────────────────────────
             if (kb.numpad0Key.wasPressedThisFrame)     TryLightAttack();
             if (kb.numpadEnterKey.wasPressedThisFrame) TryHeavyAttack();
         }
 
         _move = new Vector2(x, y);
 
-        // Update facing direction
         if (x > 0.1f)       SetFacing(true);
         else if (x < -0.1f) SetFacing(false);
 
         // Fast-fall
         if (y < -0.5f && !isGrounded && _rb.linearVelocity.y < 0)
-            _rb.linearVelocity = new Vector2(
-                _rb.linearVelocity.x,
+            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x,
                 Mathf.Min(_rb.linearVelocity.y, -fastFallForce));
     }
 
-    // ─── Ground detection ─────────────────────────────────────
     private void CheckGround()
     {
         bool prev  = isGrounded;
@@ -148,7 +131,6 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // ─── Movement ─────────────────────────────────────────────
     private void ApplyMovement()
     {
         if (isAttacking) return;
@@ -162,7 +144,6 @@ public class PlayerController : MonoBehaviour
             _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, maxFallSpeed);
     }
 
-    // ─── Facing ───────────────────────────────────────────────
     private void SetFacing(bool right)
     {
         if (_facingRight == right) return;
@@ -182,9 +163,9 @@ public class PlayerController : MonoBehaviour
         SetFacing(target.position.x > transform.position.x);
     }
 
-    // ─── Jump ─────────────────────────────────────────────────
     private void TryJump()
     {
+        if (isAttacking || isDead) return;
         if (_jumpsLeft <= 0) return;
         _jumpsLeft--;
         _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
@@ -192,7 +173,6 @@ public class PlayerController : MonoBehaviour
         AudioManager.Instance?.PlayJump();
     }
 
-    // ─── Attacks ──────────────────────────────────────────────
     private void TryLightAttack()
     {
         if (isAttacking || isDead || _combat == null) return;
@@ -205,7 +185,6 @@ public class PlayerController : MonoBehaviour
         _combat.PerformHeavyAttack(_move);
     }
 
-    // ─── Animator sync ────────────────────────────────────────
     private void SyncAnimator()
     {
         if (_anim == null) return;
@@ -215,7 +194,6 @@ public class PlayerController : MonoBehaviour
         _anim.SetFloat(H_VelY,    _rb.linearVelocity.y);
     }
 
-    // ─── Public API ───────────────────────────────────────────
     public void OnHitReceived()
     {
         if (_anim != null) _anim.SetTrigger(H_Hit);
@@ -235,15 +213,12 @@ public class PlayerController : MonoBehaviour
         isAttacking = false;
         _jumpsLeft  = MAX_JUMPS;
         _move       = Vector2.zero;
-
         _rb.bodyType       = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
         transform.position = spawnPos;
-
         if (_anim != null) { _anim.Rebind(); _anim.Update(0f); }
     }
 
-    // ─── Gizmos ───────────────────────────────────────────────
     private void OnDrawGizmosSelected()
     {
         if (groundCheck == null) return;

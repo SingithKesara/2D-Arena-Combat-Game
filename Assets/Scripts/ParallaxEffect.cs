@@ -1,28 +1,30 @@
-﻿using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine;
 
+/// <summary>
+/// Simple parallax background scroll.
+/// followTarget is optional — if null, only camera movement drives the effect.
+/// </summary>
 public class ParallaxEffect : MonoBehaviour
 {
-    public Camera cam;
+    public Camera    cam;
+    [Tooltip("Optional. If left empty, parallax is driven by camera movement alone.")]
     public Transform followTarget;
-    Vector2 startingPosition;
-    float startingZ;
-    Vector2 camMoveSinceStart =>(Vector2) cam.transform.position - startingPosition;
-    float zDistanceFromTarget => transform.position.z - followTarget.position.z;
+    [Range(0f, 1f)]
+    public float     parallaxStrength = 0.2f;
 
-    float clippingPlane => (cam.transform.position.z + (zDistanceFromTarget > 0 ? cam.farClipPlane : cam.nearClipPlane));
-    float parallaxFactor => Mathf.Abs(zDistanceFromTarget) / clippingPlane;
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    private Vector3 _lastCamPos;
+
     void Start()
     {
-       startingPosition = transform.position;
-        startingZ = transform.position.z;
+        if (cam == null) cam = Camera.main;
+        if (cam != null) _lastCamPos = cam.transform.position;
     }
 
-    // Update is called once per frame
-    void Update()
+    void LateUpdate()
     {
-        Vector2 newPosition = startingPosition + camMoveSinceStart * parallaxFactor;
-        transform.position = new Vector3(newPosition.x,newPosition.y,startingZ);    
+        if (cam == null) return;
+        Vector3 delta = cam.transform.position - _lastCamPos;
+        transform.position += new Vector3(delta.x * parallaxStrength, delta.y * parallaxStrength * 0.3f, 0f);
+        _lastCamPos = cam.transform.position;
     }
 }
