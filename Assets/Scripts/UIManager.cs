@@ -1,44 +1,49 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using TMPro;
 
 /// <summary>
 /// Drives all in-game HUD elements.
-/// References wired directly by AutoSetup so no timing issues.
+/// Uses Image.fillAmount instead of Slider for reliable visible health bars.
+/// References wired by AutoSetup ④ — also has runtime fallback FindObjectOfType.
 /// </summary>
 public class UIManager : MonoBehaviour
 {
-    [Header("Health Bars")]
-    public Slider           healthBarP1;
-    public Slider           healthBarP2;
-    public Image            healthFillP1;
-    public Image            healthFillP2;
+    // ── Health bar IMAGES (not Sliders — more reliable) ───────
+    [Header("Health Bar Fill Images")]
+    [Tooltip("The Image inside the P1 health bar — set fillMethod=Horizontal in Inspector")]
+    public Image healthFillP1;
+    [Tooltip("The Image inside the P2 health bar — set fillMethod=Horizontal in Inspector")]
+    public Image healthFillP2;
 
     [Header("HP Text Labels")]
-    public TextMeshProUGUI  hpTextP1;
-    public TextMeshProUGUI  hpTextP2;
+    public TextMeshProUGUI hpTextP1;
+    public TextMeshProUGUI hpTextP2;
 
-    [Header("Direct Health Manager References")]
-    public HealthManager    healthManagerP1;
-    public HealthManager    healthManagerP2;
+    [Header("Direct Health Manager References (wired by AutoSetup)")]
+    public HealthManager healthManagerP1;
+    public HealthManager healthManagerP2;
 
     [Header("Timer")]
-    public TextMeshProUGUI  timerText;
+    public TextMeshProUGUI timerText;
 
     [Header("Round / Announcement")]
-    public TextMeshProUGUI  announcementText;
+    public TextMeshProUGUI announcementText;
 
-    [Header("Score")]
-    public TextMeshProUGUI  p1ScoreText;
-    public TextMeshProUGUI  p2ScoreText;
+    [Header("Score Dots")]
+    public TextMeshProUGUI p1ScoreText;
+    public TextMeshProUGUI p2ScoreText;
 
     [Header("Match Over Panel")]
-    public GameObject       matchOverPanel;
-    public TextMeshProUGUI  resultText;
-    public Button           rematchButton;
-    public Button           quitButton;
+    public GameObject      matchOverPanel;
+    public TextMeshProUGUI resultText;
+    public Button          rematchButton;
+    public Button          quitButton;
+    public Button          menuButton;
 
+    // Health colour thresholds
     private static readonly Color ColHigh = new Color(0.08f, 0.90f, 0.15f);
     private static readonly Color ColMid  = new Color(1.00f, 0.82f, 0.08f);
     private static readonly Color ColLow  = new Color(0.92f, 0.10f, 0.08f);
@@ -46,21 +51,35 @@ public class UIManager : MonoBehaviour
     private GameStateManager _gsm;
     private Coroutine        _annCo;
 
-    // ── Awake: subscribe before any Start() runs ──────────────
+    // ── Awake — subscribe immediately so no damage is missed ──
     private void Awake()
     {
-        // Wire from direct references (assigned by AutoSetup)
-        if (healthManagerP1 != null)
-            healthManagerP1.OnHealthChanged += (c, m) => RefreshHealth(1, c, m);
-        if (healthManagerP2 != null)
-            healthManagerP2.OnHealthChanged += (c, m) => RefreshHealth(2, c, m);
+        // Fallback: try to find HealthManagers in scene if not assigned
+        if (healthManagerP1 == null || healthManagerP2 == null)
+        {
+            var all = FindObjectsByType<HealthManager>(FindObjectsSortMode.None);
+            foreach (var hm in all)
+            {
+                var pc = hm.GetComponent<PlayerController>();
+                if (pc == null) continue;
+                if (pc.playerIndex == 1 && healthManagerP1 == null) healthManagerP1 = hm;
+                if (pc.playerIndex == 2 && healthManagerP2 == null) healthManagerP2 = hm;
+            }
+        }
 
-        // Buttons
+        if (healthManagerP1 != null) healthManagerP1.OnHealthChanged += OnP1HealthChanged;
+        if (healthManagerP2 != null) healthManagerP2.OnHealthChanged += OnP2HealthChanged;
+
+        // Ensure fill images are set up correctly for horizontal fill
+        SetupFillImage(healthFillP1);
+        SetupFillImage(healthFillP2);
+
+        if (matchOverPanel  != null) matchOverPanel.SetActive(false);
+        if (announcementText!= null) announcementText.text = "";
+
         rematchButton?.onClick.AddListener(() => GameStateManager.Instance?.RestartMatch());
         quitButton?.onClick.AddListener(Application.Quit);
-
-        if (matchOverPanel != null) matchOverPanel.SetActive(false);
-        if (announcementText != null) announcementText.text = "";
+        menuButton?.onClick.AddListener(() => SceneManager.LoadScene("MainMenu"));
     }
 
     private void Start()
@@ -75,21 +94,19 @@ public class UIManager : MonoBehaviour
             _gsm.OnRoundStart     += OnRoundStart;
         }
 
-        // Show initial full bars
-        int maxP1 = healthManagerP1 != null ? healthManagerP1.maxHealth : 100;
-        int maxP2 = healthManagerP2 != null ? healthManagerP2.maxHealth : 100;
-        RefreshHealth(1, maxP1, maxP1);
-        RefreshHealth(2, maxP2, maxP2);
+        // Initialise bars immediately
+        int mp1 = healthManagerP1 != null ? healthManagerP1.maxHealth : 100;
+        int mp2 = healthManagerP2 != null ? healthManagerP2.maxHealth : 100;
+        SetHealthBar(healthFillP1, hpTextP1, mp1, mp1);
+        SetHealthBar(healthFillP2, hpTextP2, mp2, mp2);
         RefreshTimer(99f);
         RefreshScore(0, 0);
     }
 
     private void OnDestroy()
     {
-        if (healthManagerP1 != null)
-            healthManagerP1.OnHealthChanged -= (c, m) => RefreshHealth(1, c, m);
-        if (healthManagerP2 != null)
-            healthManagerP2.OnHealthChanged -= (c, m) => RefreshHealth(2, c, m);
+        if (healthManagerP1 != null) healthManagerP1.OnHealthChanged -= OnP1HealthChanged;
+        if (healthManagerP2 != null) healthManagerP2.OnHealthChanged -= OnP2HealthChanged;
         if (_gsm != null)
         {
             _gsm.OnTimerUpdate    -= RefreshTimer;
@@ -100,24 +117,29 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    // ── Health bars ───────────────────────────────────────────
-    private void RefreshHealth(int idx, int current, int max)
-    {
-        float t = max > 0 ? (float)current / max : 0f;
-        Color c = HealthColour(t);
+    // ── Health callbacks ─────────────────────────────────────
+    private void OnP1HealthChanged(int current, int max)
+        => SetHealthBar(healthFillP1, hpTextP1, current, max);
 
-        if (idx == 1)
-        {
-            if (healthBarP1  != null) healthBarP1.value  = t;
-            if (healthFillP1 != null) healthFillP1.color  = c;
-            if (hpTextP1     != null) hpTextP1.text       = current.ToString();
-        }
-        else
-        {
-            if (healthBarP2  != null) healthBarP2.value  = t;
-            if (healthFillP2 != null) healthFillP2.color  = c;
-            if (hpTextP2     != null) hpTextP2.text       = current.ToString();
-        }
+    private void OnP2HealthChanged(int current, int max)
+        => SetHealthBar(healthFillP2, hpTextP2, current, max);
+
+    private void SetHealthBar(Image fill, TextMeshProUGUI label, int current, int max)
+    {
+        if (fill == null) return;
+        float t = max > 0 ? Mathf.Clamp01((float)current / max) : 0f;
+        fill.fillAmount = t;
+        fill.color      = HealthColour(t);
+        if (label != null) label.text = current.ToString();
+    }
+
+    private static void SetupFillImage(Image img)
+    {
+        if (img == null) return;
+        img.type       = Image.Type.Filled;
+        img.fillMethod = Image.FillMethod.Horizontal;
+        img.fillOrigin = 0; // left-to-right
+        img.fillAmount = 1f;
     }
 
     private static Color HealthColour(float t)
@@ -126,7 +148,7 @@ public class UIManager : MonoBehaviour
         return Color.Lerp(ColLow, ColMid, t * 2f);
     }
 
-    // ── Timer ─────────────────────────────────────────────────
+    // ── Timer ────────────────────────────────────────────────
     private void RefreshTimer(float seconds)
     {
         if (timerText == null) return;
@@ -143,16 +165,17 @@ public class UIManager : MonoBehaviour
         if (announcementText == null) return;
         if (_annCo != null) StopCoroutine(_annCo);
         announcementText.text  = msg;
-        announcementText.color = GetAnnouncementColour(msg);
+        announcementText.color = AnnouncementColour(msg);
         if (!string.IsNullOrEmpty(msg))
-            _annCo = StartCoroutine(FadeAnnouncement(2f));
+            _annCo = StartCoroutine(FadeAnnouncement(1.8f));
     }
 
-    private static Color GetAnnouncementColour(string m)
+    private static Color AnnouncementColour(string m)
     {
-        if (m.Contains("FIGHT"))  return new Color(1f, 0.3f, 0.1f);
-        if (m.Contains("WINS"))   return Color.yellow;
-        if (m.Contains("TIME"))   return new Color(1f, 0.6f, 0f);
+        if (m.Contains("FIGHT")) return new Color(1f, 0.3f, 0.1f);
+        if (m.Contains("WINS"))  return Color.yellow;
+        if (m.Contains("TIME"))  return new Color(1f, 0.6f, 0f);
+        if (m.Contains("ROUND")) return Color.white;
         return Color.white;
     }
 
@@ -160,11 +183,11 @@ public class UIManager : MonoBehaviour
     {
         yield return new WaitForSeconds(stay);
         float t = 0f;
-        Color start = announcementText.color;
+        Color s = announcementText.color;
         while (t < 0.5f)
         {
             t += Time.deltaTime;
-            announcementText.color = new Color(start.r, start.g, start.b, 1f - t / 0.5f);
+            announcementText.color = new Color(s.r, s.g, s.b, 1f - t / 0.5f);
             yield return null;
         }
         announcementText.text = "";

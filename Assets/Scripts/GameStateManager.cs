@@ -174,6 +174,12 @@ public class GameStateManager : MonoBehaviour
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
+    public void ReturnToMainMenu()
+    {
+        AudioManager.Instance?.PlayUIConfirm();
+        SceneManager.LoadScene("MainMenu");
+    }
+
     // ─────────────── Helpers ──────────────────────────────────
     private void ResetPlayers()
     {
