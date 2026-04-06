@@ -2,16 +2,15 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using TMPro;
 
 /// <summary>
-/// Manages the Main Menu scene.
-/// Shows game title, Play / Quit buttons, and a controls reference panel.
-/// Built and wired entirely by AutoSetup ⑦.
+
 /// </summary>
 public class MainMenuManager : MonoBehaviour
 {
-    // ── Inspector references (set by AutoSetup) ───────────────
     [Header("Panels")]
     public GameObject menuPanel;
     public GameObject controlsPanel;
@@ -26,72 +25,92 @@ public class MainMenuManager : MonoBehaviour
     public AudioSource menuMusic;
     public AudioClip   menuMusicClip;
     public AudioClip   clickSFX;
-    public AudioClip   hoverSFX;
 
     [Header("Transition")]
     public CanvasGroup fadeGroup;
-    public float       fadeDuration = 0.6f;
+    public float       fadeDuration = 0.5f;
 
-    [Header("Scene")]
-    [Tooltip("Name of the gameplay scene to load")]
-    public string gameplaySceneName = "Gameplay";
+    [Header("Scene Name")]
+    public string gameplaySceneName = "Gameplayscene";
 
-    private AudioSource _sfxSource;
+    private AudioSource _sfx;
+    private bool        _transitioning;
 
-    // ── Unity lifecycle ────────────────────────────────────────
     private void Awake()
     {
-        _sfxSource = gameObject.AddComponent<AudioSource>();
-        _sfxSource.playOnAwake = false;
-        _sfxSource.volume = 0.8f;
+        // CRITICAL: Ensure there is an EventSystem for mouse/keyboard UI input
+        if (FindFirstObjectByType<EventSystem>() == null)
+        {
+            var esGO = new GameObject("EventSystem");
+            esGO.AddComponent<EventSystem>();
+            // InputSystemUIInputModule handles UI with New Input System
+            esGO.AddComponent<InputSystemUIInputModule>();
+            Debug.Log("[MainMenu] Created missing EventSystem.");
+        }
+
+        _sfx = gameObject.AddComponent<AudioSource>();
+        _sfx.playOnAwake = false;
+        _sfx.volume = 0.9f;
 
         if (menuPanel    != null) menuPanel.SetActive(true);
         if (controlsPanel!= null) controlsPanel.SetActive(false);
 
-        if (fadeGroup != null)
-        {
-            fadeGroup.alpha = 1f;
-            StartCoroutine(FadeIn());
-        }
+        if (fadeGroup != null) { fadeGroup.alpha = 1f; StartCoroutine(FadeIn()); }
     }
 
     private void Start()
     {
-        // Play menu music
         if (menuMusic != null && menuMusicClip != null)
         {
-            menuMusic.clip = menuMusicClip;
-            menuMusic.loop = true;
-            menuMusic.volume = 0.4f;
+            menuMusic.clip = menuMusicClip; menuMusic.loop = true; menuMusic.volume = 0.35f;
             menuMusic.Play();
         }
 
-        // Wire buttons
+        // Wire buttons via code (belt-and-suspenders alongside Inspector wiring)
         playButton?.onClick.AddListener(OnPlay);
         controlsButton?.onClick.AddListener(OnShowControls);
         backButton?.onClick.AddListener(OnHideControls);
         quitButton?.onClick.AddListener(OnQuit);
+
+        // Select first button so keyboard navigation works immediately
+        if (playButton != null) playButton.Select();
     }
 
-    // ── Button handlers ────────────────────────────────────────
+    private void Update()
+    {
+        if (_transitioning) return;
+
+        // Keyboard shortcuts
+        if (UnityEngine.InputSystem.Keyboard.current?.escapeKey.wasPressedThisFrame == true)
+        {
+            if (controlsPanel != null && controlsPanel.activeSelf) OnHideControls();
+            else OnQuit();
+        }
+    }
+
+    // ── Handlers ──────────────────────────────────────────────
     public void OnPlay()
     {
+        if (_transitioning) return;
+        _transitioning = true;
         PlayClick();
-        StartCoroutine(LoadGameplay());
+        StartCoroutine(LoadScene());
     }
 
     public void OnShowControls()
     {
         PlayClick();
-        if (menuPanel     != null) menuPanel.SetActive(false);
-        if (controlsPanel != null) controlsPanel.SetActive(true);
+        if (menuPanel    != null) menuPanel.SetActive(false);
+        if (controlsPanel!= null) controlsPanel.SetActive(true);
+        if (backButton   != null) backButton.Select();
     }
 
     public void OnHideControls()
     {
         PlayClick();
-        if (controlsPanel != null) controlsPanel.SetActive(false);
-        if (menuPanel     != null) menuPanel.SetActive(true);
+        if (controlsPanel!= null) controlsPanel.SetActive(false);
+        if (menuPanel    != null) menuPanel.SetActive(true);
+        if (playButton   != null) playButton.Select();
     }
 
     public void OnQuit()
@@ -103,24 +122,21 @@ public class MainMenuManager : MonoBehaviour
 #endif
     }
 
-    // ── Scene transition ──────────────────────────────────────
-    private IEnumerator LoadGameplay()
+    // ── Scene load with fade ──────────────────────────────────
+    private IEnumerator LoadScene()
     {
         if (fadeGroup != null)
         {
             float t = 0f;
             while (t < fadeDuration)
             {
-                t += Time.deltaTime;
+                t += Time.unscaledDeltaTime;
                 fadeGroup.alpha = t / fadeDuration;
                 yield return null;
             }
             fadeGroup.alpha = 1f;
         }
-        else
-        {
-            yield return new WaitForSeconds(0.1f);
-        }
+        else yield return new WaitForSecondsRealtime(0.05f);
 
         SceneManager.LoadScene(gameplaySceneName);
     }
@@ -130,23 +146,15 @@ public class MainMenuManager : MonoBehaviour
         float t = fadeDuration;
         while (t > 0f)
         {
-            t -= Time.deltaTime;
+            t -= Time.unscaledDeltaTime;
             if (fadeGroup != null) fadeGroup.alpha = t / fadeDuration;
             yield return null;
         }
         if (fadeGroup != null) fadeGroup.alpha = 0f;
     }
 
-    // ── Audio ────────────────────────────────────────────────
     private void PlayClick()
     {
-        if (_sfxSource != null && clickSFX != null)
-            _sfxSource.PlayOneShot(clickSFX);
-    }
-
-    public void PlayHover()
-    {
-        if (_sfxSource != null && hoverSFX != null)
-            _sfxSource.PlayOneShot(hoverSFX, 0.5f);
+        if (_sfx != null && clickSFX != null) _sfx.PlayOneShot(clickSFX);
     }
 }
