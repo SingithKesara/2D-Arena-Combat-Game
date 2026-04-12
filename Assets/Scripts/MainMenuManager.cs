@@ -7,7 +7,12 @@ using UnityEngine.InputSystem.UI;
 using TMPro;
 
 /// <summary>
-
+/// Main Menu controller.
+/// Key fixes:
+///   - ASCII-only button labels (no Unicode arrows that break LiberationSans)
+///   - Ensures EventSystem exists so mouse & keyboard work
+///   - Correct gameplay scene name match
+///   - Keyboard navigation: Enter/Space = Play, Esc = Quit
 /// </summary>
 public class MainMenuManager : MonoBehaviour
 {
@@ -39,13 +44,11 @@ public class MainMenuManager : MonoBehaviour
     private void Awake()
     {
         // CRITICAL: Ensure there is an EventSystem for mouse/keyboard UI input
-        if (FindFirstObjectByType<EventSystem>() == null)
+        if (FindAnyObjectByType<EventSystem>() == null)
         {
             var esGO = new GameObject("EventSystem");
             esGO.AddComponent<EventSystem>();
-            // InputSystemUIInputModule handles UI with New Input System
             esGO.AddComponent<InputSystemUIInputModule>();
-            Debug.Log("[MainMenu] Created missing EventSystem.");
         }
 
         _sfx = gameObject.AddComponent<AudioSource>();
