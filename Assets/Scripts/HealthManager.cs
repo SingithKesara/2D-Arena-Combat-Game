@@ -1,10 +1,6 @@
 using System;
 using UnityEngine;
 
-/// <summary>
-/// Tracks a player's current health, applies incoming damage + knockback,
-/// triggers animations, plays SFX, and notifies GameStateManager on death.
-/// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class HealthManager : MonoBehaviour
 {
@@ -36,8 +32,7 @@ public class HealthManager : MonoBehaviour
         if (_isInvincible)
         {
             _iFrameTimer -= Time.deltaTime;
-            if (_iFrameTimer <= 0f)
-                _isInvincible = false;
+            if (_iFrameTimer <= 0f) _isInvincible = false;
         }
     }
 
@@ -62,10 +57,8 @@ public class HealthManager : MonoBehaviour
 
     private void Die()
     {
-        AudioManager.Instance?.PlayDeath();
         _pc.OnDeath();
         OnDied?.Invoke();
-
         if (GameStateManager.Instance != null && _pc != null)
             GameStateManager.Instance.OnPlayerDied(_pc.playerIndex);
     }

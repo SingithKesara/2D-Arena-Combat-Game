@@ -1,161 +1,200 @@
-using UnityEngine;
 using System;
 using System.Collections;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class GameStateManager : MonoBehaviour
 {
-    public static GameStateManager Instance;
+    public static GameStateManager Instance { get; private set; }
 
-    public PlayerController player1;
-    public PlayerController player2;
-
-    public Transform spawnP1;
-    public Transform spawnP2;
-
+    [Header("Match Settings")]
     public int roundsToWin = 2;
     public float matchTimeSec = 99f;
 
-    public float roundIntroDelay = 1.2f;
-    public float roundEndDelay = 2.5f;
+    [Header("Round Timing")]
+    public float roundIntroDelay = 1.0f;
+    public float fightTextDelay = 0.7f;
+    public float roundEndDelay = 2.0f;
 
-    private int p1Score = 0;
-    private int p2Score = 0;
+    [Header("Spawn Points")]
+    public Transform spawnP1;
+    public Transform spawnP2;
 
-    private float currentTime;
-    private bool roundActive = false;
-    private bool matchOver = false;
+    [Header("Players")]
+    public PlayerController player1;
+    public PlayerController player2;
 
-    // EVENTS (needed by UIManager)
+    public enum MatchState { Intro, Fighting, RoundEnd, MatchOver }
+    public MatchState State { get; private set; } = MatchState.Intro;
+
+    private float _timeRemaining;
+    private int _p1Wins;
+    private int _p2Wins;
+    private int _currentRound = 1;
+    private bool _roundEndStarted;
+
     public event Action<float> OnTimerUpdate;
     public event Action<string> OnRoundIntroText;
     public event Action<int, int> OnScoreUpdate;
     public event Action<string> OnMatchResult;
     public event Action OnRoundStart;
+    public event Action OnRoundEnd;
 
-    void Awake()
+    private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
         Instance = this;
     }
 
-    void Start()
+    private void Start()
     {
-        StartCoroutine(StartRound());
+        StartCoroutine(DoRoundIntro());
     }
 
-    void Update()
+    private void Update()
     {
-        if (!roundActive || matchOver) return;
+        if (State != MatchState.Fighting) return;
 
-        currentTime -= Time.deltaTime;
+        _timeRemaining = Mathf.Max(0f, _timeRemaining - Time.deltaTime);
+        OnTimerUpdate?.Invoke(_timeRemaining);
 
-        OnTimerUpdate?.Invoke(currentTime);
-
-        if (currentTime <= 0f)
+        if (_timeRemaining <= 0f && !_roundEndStarted)
         {
-            EndRoundByTime();
+            _roundEndStarted = true;
+            StartCoroutine(OnTimeUp());
         }
     }
 
-    IEnumerator StartRound()
+    private IEnumerator DoRoundIntro()
     {
-        roundActive = false;
+        State = MatchState.Intro;
+        _roundEndStarted = false;
 
         ResetPlayers();
+        LockPlayers(true);
 
-        OnRoundIntroText?.Invoke("ROUND START");
-
+        yield return new WaitForSeconds(0.35f);
+        OnRoundIntroText?.Invoke($"ROUND {_currentRound}");
         yield return new WaitForSeconds(roundIntroDelay);
+        OnRoundIntroText?.Invoke("FIGHT!");
+        yield return new WaitForSeconds(fightTextDelay);
+        OnRoundIntroText?.Invoke(string.Empty);
 
-        currentTime = matchTimeSec;
-        roundActive = true;
-
+        LockPlayers(false);
+        _timeRemaining = matchTimeSec;
+        OnTimerUpdate?.Invoke(_timeRemaining);
+        State = MatchState.Fighting;
         OnRoundStart?.Invoke();
-    }
-
-    void ResetPlayers()
-    {
-        player1.transform.position = spawnP1.position;
-        player2.transform.position = spawnP2.position;
-
-        player1.ResetState();
-        player2.ResetState();
-
-        player1.GetComponent<HealthManager>().ResetHealth();
-        player2.GetComponent<HealthManager>().ResetHealth();
     }
 
     public void OnPlayerDied(int deadPlayerIndex)
     {
-        if (!roundActive) return;
-
-        roundActive = false;
-
-        if (deadPlayerIndex == 1)
-            p2Score++;
-        else
-            p1Score++;
-
-        OnScoreUpdate?.Invoke(p1Score, p2Score);
-
-        StartCoroutine(HandleRoundEnd());
+        if (State != MatchState.Fighting || _roundEndStarted) return;
+        _roundEndStarted = true;
+        StartCoroutine(EndRound(deadPlayerIndex));
     }
 
-    IEnumerator HandleRoundEnd()
+    private IEnumerator EndRound(int loserIndex)
     {
+        State = MatchState.RoundEnd;
+        LockPlayers(true);
+        OnRoundEnd?.Invoke();
+
+        if (loserIndex == 1) _p2Wins++; else _p1Wins++;
+        OnScoreUpdate?.Invoke(_p1Wins, _p2Wins);
+
+        string msg = loserIndex == 1 ? "PLAYER 2 WINS ROUND!" : "PLAYER 1 WINS ROUND!";
+        OnRoundIntroText?.Invoke(msg);
+
         yield return new WaitForSeconds(roundEndDelay);
 
-        if (p1Score >= roundsToWin || p2Score >= roundsToWin)
-        {
-            StartCoroutine(HandleMatchEnd());
-        }
+        if (_p1Wins >= roundsToWin) EndMatch("PLAYER 1\nWINS!");
+        else if (_p2Wins >= roundsToWin) EndMatch("PLAYER 2\nWINS!");
         else
         {
-            StartCoroutine(StartRound());
+            _currentRound++;
+            StartCoroutine(DoRoundIntro());
         }
     }
 
-    IEnumerator HandleMatchEnd()
+    private IEnumerator OnTimeUp()
     {
-        matchOver = true;
+        State = MatchState.RoundEnd;
+        LockPlayers(true);
+        OnRoundEnd?.Invoke();
 
-        string winner = p1Score > p2Score ? "PLAYER 1 WINS" : "PLAYER 2 WINS";
-        OnMatchResult?.Invoke(winner);
+        HealthManager hm1 = player1.GetComponent<HealthManager>();
+        HealthManager hm2 = player2.GetComponent<HealthManager>();
 
-        yield return new WaitForSeconds(2f);
+        string msg;
+        if (hm1.CurrentHealth > hm2.CurrentHealth) { _p1Wins++; msg = "TIME! PLAYER 1 WINS ROUND!"; }
+        else if (hm2.CurrentHealth > hm1.CurrentHealth) { _p2Wins++; msg = "TIME! PLAYER 2 WINS ROUND!"; }
+        else { msg = "TIME! DRAW!"; }
 
-        // clean reset (NO scene reload = no white screen)
-        p1Score = 0;
-        p2Score = 0;
-        matchOver = false;
+        OnScoreUpdate?.Invoke(_p1Wins, _p2Wins);
+        OnRoundIntroText?.Invoke(msg);
 
-        StartCoroutine(StartRound());
+        yield return new WaitForSeconds(roundEndDelay);
+
+        if (_p1Wins >= roundsToWin) EndMatch("PLAYER 1\nWINS!");
+        else if (_p2Wins >= roundsToWin) EndMatch("PLAYER 2\nWINS!");
+        else
+        {
+            _currentRound++;
+            StartCoroutine(DoRoundIntro());
+        }
     }
 
-    void EndRoundByTime()
+    private void EndMatch(string result)
     {
-        roundActive = false;
-
-        int p1HP = player1.GetComponent<HealthManager>().CurrentHealth;
-        int p2HP = player2.GetComponent<HealthManager>().CurrentHealth;
-
-        if (p1HP > p2HP)
-            p1Score++;
-        else if (p2HP > p1HP)
-            p2Score++;
-
-        OnScoreUpdate?.Invoke(p1Score, p2Score);
-
-        StartCoroutine(HandleRoundEnd());
+        State = MatchState.MatchOver;
+        LockPlayers(true);
+        OnMatchResult?.Invoke(result);
     }
-    
+
     public void RestartMatch()
     {
         StopAllCoroutines();
+        _p1Wins = 0;
+        _p2Wins = 0;
+        _currentRound = 1;
+        _roundEndStarted = false;
+        StartCoroutine(DoRoundIntro());
+    }
 
-        p1Score = 0;
-        p2Score = 0;
-        matchOver = false;
+    public void ReturnToMainMenu()
+    {
+        SceneManager.LoadScene("MainMenu");
+    }
 
-        StartCoroutine(StartRound());
+    private void ResetPlayers()
+    {
+        if (player1 != null && spawnP1 != null)
+        {
+            player1.ResetForNewRound(spawnP1.position);
+            player1.GetComponent<HealthManager>()?.ResetHealth();
+        }
+
+        if (player2 != null && spawnP2 != null)
+        {
+            player2.ResetForNewRound(spawnP2.position);
+            player2.GetComponent<HealthManager>()?.ResetHealth();
+        }
+
+        if (player1 != null && player2 != null)
+        {
+            player1.FaceTarget(player2.transform);
+            player2.FaceTarget(player1.transform);
+        }
+    }
+
+    private void LockPlayers(bool locked)
+    {
+        if (player1 != null) player1.isAttacking = locked;
+        if (player2 != null) player2.isAttacking = locked;
     }
 }
