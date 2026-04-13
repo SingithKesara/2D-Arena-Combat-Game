@@ -57,7 +57,7 @@ public class UIManager : MonoBehaviour
         // Fallback: try to find HealthManagers in scene if not assigned
         if (healthManagerP1 == null || healthManagerP2 == null)
         {
-            var all = FindObjectsByType<HealthManager>(FindObjectsSortMode.None);
+            var all = FindObjectsByType<HealthManager>();
             foreach (var hm in all)
             {
                 var pc = hm.GetComponent<PlayerController>();
