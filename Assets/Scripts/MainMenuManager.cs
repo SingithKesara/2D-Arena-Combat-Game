@@ -2,18 +2,8 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.UI;
 using TMPro;
 
-/// <summary>
-/// Main Menu controller.
-/// Key fixes:
-///   - ASCII-only button labels (no Unicode arrows that break LiberationSans)
-///   - Ensures EventSystem exists so mouse & keyboard work
-///   - Correct gameplay scene name match
-///   - Keyboard navigation: Enter/Space = Play, Esc = Quit
-/// </summary>
 public class MainMenuManager : MonoBehaviour
 {
     [Header("Panels")]
@@ -26,138 +16,94 @@ public class MainMenuManager : MonoBehaviour
     public Button backButton;
     public Button quitButton;
 
-    [Header("Audio")]
-    public AudioSource menuMusic;
-    public AudioClip   menuMusicClip;
-    public AudioClip   clickSFX;
-
-    [Header("Transition")]
+    [Header("Fade")]
     public CanvasGroup fadeGroup;
-    public float       fadeDuration = 0.5f;
+    public float fadeDuration = 0.4f;
 
-    [Header("Scene Name")]
-    public string gameplaySceneName = "Gameplayscene";
+    [Header("Scene")]
+    public string gameplaySceneName = "GameplayScene";
 
-    private AudioSource _sfx;
-    private bool        _transitioning;
+    private bool _busy;
 
     private void Awake()
     {
-        // CRITICAL: Ensure there is an EventSystem for mouse/keyboard UI input
-        if (FindAnyObjectByType<EventSystem>() == null)
-        {
-            var esGO = new GameObject("EventSystem");
-            esGO.AddComponent<EventSystem>();
-            esGO.AddComponent<InputSystemUIInputModule>();
-        }
+        if (menuPanel != null) menuPanel.SetActive(true);
+        if (controlsPanel != null) controlsPanel.SetActive(false);
 
-        _sfx = gameObject.AddComponent<AudioSource>();
-        _sfx.playOnAwake = false;
-        _sfx.volume = 0.9f;
-
-        if (menuPanel    != null) menuPanel.SetActive(true);
-        if (controlsPanel!= null) controlsPanel.SetActive(false);
-
-        if (fadeGroup != null) { fadeGroup.alpha = 1f; StartCoroutine(FadeIn()); }
-    }
-
-    private void Start()
-    {
-        if (menuMusic != null && menuMusicClip != null)
-        {
-            menuMusic.clip = menuMusicClip; menuMusic.loop = true; menuMusic.volume = 0.35f;
-            menuMusic.Play();
-        }
-
-        // Wire buttons via code (belt-and-suspenders alongside Inspector wiring)
-        playButton?.onClick.AddListener(OnPlay);
-        controlsButton?.onClick.AddListener(OnShowControls);
-        backButton?.onClick.AddListener(OnHideControls);
-        quitButton?.onClick.AddListener(OnQuit);
-
-        // Select first button so keyboard navigation works immediately
-        if (playButton != null) playButton.Select();
-    }
-
-    private void Update()
-    {
-        if (_transitioning) return;
-
-        // Keyboard shortcuts
-        if (UnityEngine.InputSystem.Keyboard.current?.escapeKey.wasPressedThisFrame == true)
-        {
-            if (controlsPanel != null && controlsPanel.activeSelf) OnHideControls();
-            else OnQuit();
-        }
-    }
-
-    // ── Handlers ──────────────────────────────────────────────
-    public void OnPlay()
-    {
-        if (_transitioning) return;
-        _transitioning = true;
-        PlayClick();
-        StartCoroutine(LoadScene());
-    }
-
-    public void OnShowControls()
-    {
-        PlayClick();
-        if (menuPanel    != null) menuPanel.SetActive(false);
-        if (controlsPanel!= null) controlsPanel.SetActive(true);
-        if (backButton   != null) backButton.Select();
-    }
-
-    public void OnHideControls()
-    {
-        PlayClick();
-        if (controlsPanel!= null) controlsPanel.SetActive(false);
-        if (menuPanel    != null) menuPanel.SetActive(true);
-        if (playButton   != null) playButton.Select();
-    }
-
-    public void OnQuit()
-    {
-        PlayClick();
-        Application.Quit();
-#if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false;
-#endif
-    }
-
-    // ── Scene load with fade ──────────────────────────────────
-    private IEnumerator LoadScene()
-    {
         if (fadeGroup != null)
         {
-            float t = 0f;
-            while (t < fadeDuration)
-            {
-                t += Time.unscaledDeltaTime;
-                fadeGroup.alpha = t / fadeDuration;
-                yield return null;
-            }
-            fadeGroup.alpha = 1f;
+            fadeGroup.alpha = 0f;
+            fadeGroup.blocksRaycasts = false;
+            fadeGroup.interactable = false;
         }
-        else yield return new WaitForSecondsRealtime(0.05f);
+
+        if (playButton != null) playButton.onClick.AddListener(OnPlay);
+        if (controlsButton != null) controlsButton.onClick.AddListener(OnControls);
+        if (backButton != null) backButton.onClick.AddListener(OnBack);
+        if (quitButton != null) quitButton.onClick.AddListener(OnQuit);
+    }
+
+    private void OnDestroy()
+    {
+        if (playButton != null) playButton.onClick.RemoveListener(OnPlay);
+        if (controlsButton != null) controlsButton.onClick.RemoveListener(OnControls);
+        if (backButton != null) backButton.onClick.RemoveListener(OnBack);
+        if (quitButton != null) quitButton.onClick.RemoveListener(OnQuit);
+    }
+
+    private void OnPlay()
+    {
+        if (_busy) return;
+        StartCoroutine(LoadGameplay());
+    }
+
+    private void OnControls()
+    {
+        if (_busy) return;
+        if (menuPanel != null) menuPanel.SetActive(false);
+        if (controlsPanel != null) controlsPanel.SetActive(true);
+    }
+
+    private void OnBack()
+    {
+        if (_busy) return;
+        if (controlsPanel != null) controlsPanel.SetActive(false);
+        if (menuPanel != null) menuPanel.SetActive(true);
+    }
+
+    private void OnQuit()
+    {
+        if (_busy) return;
+        Application.Quit();
+    }
+
+    private IEnumerator LoadGameplay()
+    {
+        _busy = true;
+
+        if (fadeGroup != null)
+        {
+            fadeGroup.blocksRaycasts = true;
+            yield return StartCoroutine(Fade(0f, 1f));
+        }
 
         SceneManager.LoadScene(gameplaySceneName);
     }
 
-    private IEnumerator FadeIn()
+    private IEnumerator Fade(float from, float to)
     {
-        float t = fadeDuration;
-        while (t > 0f)
+        if (fadeGroup == null) yield break;
+
+        float t = 0f;
+        fadeGroup.alpha = from;
+
+        while (t < fadeDuration)
         {
-            t -= Time.unscaledDeltaTime;
-            if (fadeGroup != null) fadeGroup.alpha = t / fadeDuration;
+            t += Time.deltaTime;
+            fadeGroup.alpha = Mathf.Lerp(from, to, t / fadeDuration);
             yield return null;
         }
-        if (fadeGroup != null) fadeGroup.alpha = 0f;
-    }
 
-    private void PlayClick()
-    {
-        if (_sfx != null && clickSFX != null) _sfx.PlayOneShot(clickSFX);
+        fadeGroup.alpha = to;
     }
 }

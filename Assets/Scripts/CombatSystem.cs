@@ -2,36 +2,37 @@ using System.Collections;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerController))]
+[RequireComponent(typeof(Animator))]
 public class CombatSystem : MonoBehaviour
 {
     [Header("Attack Hitbox")]
     public Transform attackPoint;
-    public float lightAttackRadius = 0.6f;
-    public float heavyAttackRadius = 0.9f;
     public LayerMask playerLayer;
 
     [Header("Damage")]
     public int lightDamage = 8;
     public int heavyDamage = 20;
 
-    [Header("Frame Timing (seconds)")]
-    public float lightStartup = 0.10f;
-    public float lightActive = 0.12f;
-    public float lightCooldown = 0.30f;
-    public float heavyStartup = 0.22f;
-    public float heavyActive = 0.18f;
-    public float heavyCooldown = 0.55f;
+    [Header("Range")]
+    public float lightAttackRadius = 0.65f;
+    public float heavyAttackRadius = 1.05f;
 
     [Header("Knockback")]
-    public float lightKnockback = 5f;
-    public float heavyKnockback = 12f;
+    public float lightKnockback = 7f;
+    public float heavyKnockback = 16f;
     public float upwardBias = 0.4f;
+
+    [Header("Timing")]
+    public float lightStartup = 0.08f;
+    public float lightCooldown = 0.22f;
+    public float heavyStartup = 0.16f;
+    public float heavyCooldown = 0.38f;
 
     private PlayerController _pc;
     private Animator _anim;
 
-    private static readonly int H_LightAtk = Animator.StringToHash("lightAttack");
-    private static readonly int H_HeavyAtk = Animator.StringToHash("heavyAttack");
+    private static readonly int H_LightAttack = Animator.StringToHash("lightAttack");
+    private static readonly int H_HeavyAttack = Animator.StringToHash("heavyAttack");
 
     private void Awake()
     {
@@ -39,77 +40,97 @@ public class CombatSystem : MonoBehaviour
         _anim = GetComponent<Animator>();
     }
 
-    public void PerformLightAttack(Vector2 direction)
+    public void DoLightAttack()
     {
-        if (attackPoint == null) return;
-        StartCoroutine(AttackCoroutine(direction, lightStartup, lightActive, lightCooldown,
-            lightDamage, lightAttackRadius, lightKnockback, H_LightAtk, false));
+        if (_pc == null || _pc.isDead || _pc.isAttacking) return;
+        StartCoroutine(AttackRoutine(
+            damage: lightDamage,
+            radius: lightAttackRadius,
+            knockbackForce: lightKnockback,
+            startup: lightStartup,
+            cooldown: lightCooldown,
+            animHash: H_LightAttack
+        ));
     }
 
-    public void PerformHeavyAttack(Vector2 direction)
+    public void DoHeavyAttack()
     {
-        if (attackPoint == null) return;
-        StartCoroutine(AttackCoroutine(direction, heavyStartup, heavyActive, heavyCooldown,
-            heavyDamage, heavyAttackRadius, heavyKnockback, H_HeavyAtk, true));
+        if (_pc == null || _pc.isDead || _pc.isAttacking) return;
+        StartCoroutine(AttackRoutine(
+            damage: heavyDamage,
+            radius: heavyAttackRadius,
+            knockbackForce: heavyKnockback,
+            startup: heavyStartup,
+            cooldown: heavyCooldown,
+            animHash: H_HeavyAttack
+        ));
     }
 
-    private IEnumerator AttackCoroutine(
-        Vector2 dir, float startup, float active, float cooldown,
-        int damage, float radius, float knockback, int animHash, bool isHeavy)
+    private IEnumerator AttackRoutine(
+        int damage,
+        float radius,
+        float knockbackForce,
+        float startup,
+        float cooldown,
+        int animHash)
     {
         _pc.isAttacking = true;
         _anim.SetTrigger(animHash);
 
         yield return new WaitForSeconds(startup);
 
-        float elapsed = 0f;
-        bool hitDone = false;
-
-        while (elapsed < active)
+        if (attackPoint != null)
         {
-            if (!hitDone)
+            Collider2D[] hits = Physics2D.OverlapCircleAll(
+                attackPoint.position,
+                radius,
+                playerLayer
+            );
+
+            foreach (Collider2D hit in hits)
             {
-                Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, radius, playerLayer);
-                foreach (Collider2D col in hits)
-                {
-                    if (col.gameObject == gameObject) continue;
-                    HealthManager hm = col.GetComponentInParent<HealthManager>();
-                    if (hm == null) continue;
+                if (hit.gameObject == gameObject) continue;
 
-                    Vector2 knockDir = ComputeKnockback(col.transform, dir, knockback);
-                    hm.TakeDamage(damage, knockDir);
-                    hitDone = true;
-                    break;
-                }
+                HealthManager hm = hit.GetComponent<HealthManager>();
+                if (hm == null) continue;
+
+                Vector2 dir = (hit.transform.position - transform.position).normalized;
+                if (Mathf.Abs(dir.x) < 0.1f)
+                    dir.x = transform.localScale.x >= 0f ? 1f : -1f;
+
+                Vector2 knockback = new Vector2(
+                    dir.x * knockbackForce,
+                    knockbackForce * upwardBias
+                );
+
+                hm.TakeDamage(damage, knockback);
+
+                if (HitStop.Instance != null)
+                    HitStop.Instance.DoHitStop(0.08f);
+
+                if (CameraShake.Instance != null)
+                    CameraShake.Instance.Shake(0.12f, 0.25f);
+
+                if (HitEffect.Instance != null)
+                    HitEffect.Instance.Spawn(hit.transform.position);
+
+                hit.transform.position += (Vector3)(new Vector2(Mathf.Sign(dir.x), 0f) * 0.25f);
+                break;
             }
-
-            elapsed += Time.deltaTime;
-            yield return null;
         }
 
         yield return new WaitForSeconds(cooldown);
         _pc.isAttacking = false;
     }
 
-    private Vector2 ComputeKnockback(Transform target, Vector2 inputDir, float force)
-    {
-        Vector2 away = (target.position - transform.position).normalized;
-        Vector2 dir = away;
-
-        if (inputDir.sqrMagnitude > 0.1f)
-            dir = (away + inputDir.normalized * 0.5f).normalized;
-
-        dir.y = Mathf.Max(dir.y, upwardBias);
-        dir.Normalize();
-        return dir * force;
-    }
-
     private void OnDrawGizmosSelected()
     {
         if (attackPoint == null) return;
+
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(attackPoint.position, lightAttackRadius);
-        Gizmos.color = new Color(1f, 0.4f, 0f, 0.5f);
+
+        Gizmos.color = Color.blue;
         Gizmos.DrawWireSphere(attackPoint.position, heavyAttackRadius);
     }
 }

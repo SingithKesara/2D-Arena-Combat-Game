@@ -14,10 +14,9 @@ public class PlayerController : MonoBehaviour
     public float maxFallSpeed = -28f;
 
     [Header("Ground Detection")]
+    public Transform groundCheck;
+    public float groundCheckRadius = 0.12f;
     public LayerMask groundLayer;
-    public float groundCheckDistance = 0.06f;
-    public float groundSnapDistance = 0.02f;
-    [Range(0.7f, 1f)] public float groundCheckWidthMultiplier = 0.9f;
 
     [Header("Identity")]
     public int playerIndex = 1;
@@ -36,7 +35,6 @@ public class PlayerController : MonoBehaviour
     private Rigidbody2D _rb;
     private Animator _anim;
     private CombatSystem _combat;
-    private Collider2D _col;
 
     private static readonly int H_Jump = Animator.StringToHash("jump");
     private static readonly int H_Hit = Animator.StringToHash("hit");
@@ -47,10 +45,10 @@ public class PlayerController : MonoBehaviour
         _rb = GetComponent<Rigidbody2D>();
         _anim = GetComponent<Animator>();
         _combat = GetComponent<CombatSystem>();
-        _col = GetComponent<Collider2D>();
 
         _rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        _rb.interpolation = RigidbodyInterpolation2D.Interpolate;
 
         _jumpsLeft = MAX_JUMPS;
         _facingRight = playerIndex == 1;
@@ -60,17 +58,20 @@ public class PlayerController : MonoBehaviour
     private void Update()
     {
         if (isDead) return;
+
         ReadInput();
+        CheckGround();
     }
 
     private void FixedUpdate()
     {
         if (isDead) return;
 
-        CheckGround();
         ApplyMovement();
         ClampFall();
-        SnapToGround();
+
+        if (Mathf.Abs(_rb.linearVelocity.x) < 0.1f)
+            _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
     }
 
     private void ReadInput()
@@ -86,18 +87,30 @@ public class PlayerController : MonoBehaviour
             if (kb.aKey.isPressed) x -= 1f;
             if (kb.dKey.isPressed) x += 1f;
             if (kb.sKey.isPressed) y = -1f;
-            if (kb.wKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame) TryJump();
-            if (kb.jKey.wasPressedThisFrame) TryLightAttack();
-            if (kb.kKey.wasPressedThisFrame) TryHeavyAttack();
+
+            if (kb.wKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame)
+                TryJump();
+
+            if (kb.jKey.wasPressedThisFrame)
+                TryLightAttack();
+
+            if (kb.kKey.wasPressedThisFrame)
+                TryHeavyAttack();
         }
         else
         {
             if (kb.numpad4Key.isPressed) x -= 1f;
             if (kb.numpad6Key.isPressed) x += 1f;
             if (kb.numpad5Key.isPressed) y = -1f;
-            if (kb.numpad8Key.wasPressedThisFrame) TryJump();
-            if (kb.numpad0Key.wasPressedThisFrame) TryLightAttack();
-            if (kb.numpadEnterKey.wasPressedThisFrame) TryHeavyAttack();
+
+            if (kb.numpad8Key.wasPressedThisFrame)
+                TryJump();
+
+            if (kb.numpad0Key.wasPressedThisFrame)
+                TryLightAttack();
+
+            if (kb.numpadEnterKey.wasPressedThisFrame)
+                TryHeavyAttack();
         }
 
         _move = new Vector2(x, y);
@@ -107,41 +120,43 @@ public class PlayerController : MonoBehaviour
 
         if (y < -0.5f && !isGrounded && _rb.linearVelocity.y < 0f)
         {
-            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, Mathf.Min(_rb.linearVelocity.y, -fastFallForce));
+            _rb.linearVelocity = new Vector2(
+                _rb.linearVelocity.x,
+                Mathf.Min(_rb.linearVelocity.y, -fastFallForce)
+            );
         }
     }
 
     private void CheckGround()
     {
         bool wasGrounded = isGrounded;
-        Bounds bounds = _col.bounds;
 
-        Vector2 boxCenter = new Vector2(bounds.center.x, bounds.min.y + (groundCheckDistance * 0.5f));
-        Vector2 boxSize = new Vector2(bounds.size.x * groundCheckWidthMultiplier, groundCheckDistance);
+        if (groundCheck == null)
+        {
+            isGrounded = false;
+            return;
+        }
 
-        isGrounded = Physics2D.OverlapBox(boxCenter, boxSize, 0f, groundLayer);
+        isGrounded = Physics2D.OverlapCircle(
+            groundCheck.position,
+            groundCheckRadius,
+            groundLayer
+        );
 
         if (isGrounded && !wasGrounded)
-            _jumpsLeft = MAX_JUMPS;
-
-        if (!isGrounded && _rb.linearVelocity.y <= 0.05f)
         {
-            RaycastHit2D hit = Physics2D.Raycast(bounds.center, Vector2.down, bounds.extents.y + groundSnapDistance, groundLayer);
-            if (hit.collider != null)
-            {
-                float bottomToGround = bounds.min.y - hit.point.y;
-                if (bottomToGround >= 0f && bottomToGround <= groundSnapDistance && _rb.linearVelocity.y <= 0f)
-                {
-                    isGrounded = true;
-                    _jumpsLeft = MAX_JUMPS;
-                }
-            }
+            _jumpsLeft = MAX_JUMPS;
         }
     }
 
     private void ApplyMovement()
     {
-        if (isAttacking) return;
+        if (isAttacking)
+        {
+            _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
+            return;
+        }
+
         float speed = Mathf.Abs(_move.x) > 0.5f ? runSpeed : walkSpeed;
         _rb.linearVelocity = new Vector2(_move.x * speed, _rb.linearVelocity.y);
     }
@@ -149,26 +164,8 @@ public class PlayerController : MonoBehaviour
     private void ClampFall()
     {
         if (_rb.linearVelocity.y < maxFallSpeed)
-            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, maxFallSpeed);
-    }
-
-    private void SnapToGround()
-    {
-        if (!isGrounded) return;
-        if (_rb.linearVelocity.y < -0.01f || _rb.linearVelocity.y > 0.01f) return;
-
-        Bounds bounds = _col.bounds;
-        RaycastHit2D hit = Physics2D.Raycast(bounds.center, Vector2.down, bounds.extents.y + groundSnapDistance, groundLayer);
-        if (hit.collider == null) return;
-
-        float currentBottom = bounds.min.y;
-        float targetBottom = hit.point.y;
-        float gap = currentBottom - targetBottom;
-
-        if (gap > 0.001f && gap <= groundSnapDistance)
         {
-            transform.position -= new Vector3(0f, gap, 0f);
-            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
+            _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, maxFallSpeed);
         }
     }
 
@@ -199,6 +196,7 @@ public class PlayerController : MonoBehaviour
 
         _jumpsLeft--;
         isGrounded = false;
+
         _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
         _anim.SetTrigger(H_Jump);
     }
@@ -206,13 +204,13 @@ public class PlayerController : MonoBehaviour
     private void TryLightAttack()
     {
         if (isAttacking || isDead || _combat == null) return;
-        _combat.PerformLightAttack(_move);
+        _combat.DoLightAttack();
     }
 
     private void TryHeavyAttack()
     {
         if (isAttacking || isDead || _combat == null) return;
-        _combat.PerformHeavyAttack(_move);
+        _combat.DoHeavyAttack();
     }
 
     public void OnHitReceived()
@@ -251,20 +249,16 @@ public class PlayerController : MonoBehaviour
         isGrounded = false;
         _jumpsLeft = MAX_JUMPS;
         _move = Vector2.zero;
+
         _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
     }
 
     private void OnDrawGizmosSelected()
     {
-        Collider2D col = GetComponent<Collider2D>();
-        if (col == null) return;
-
-        Bounds bounds = col.bounds;
-        Vector2 boxCenter = new Vector2(bounds.center.x, bounds.min.y + (groundCheckDistance * 0.5f));
-        Vector2 boxSize = new Vector2(bounds.size.x * groundCheckWidthMultiplier, groundCheckDistance);
+        if (groundCheck == null) return;
 
         Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawWireCube(boxCenter, boxSize);
+        Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
     }
 }

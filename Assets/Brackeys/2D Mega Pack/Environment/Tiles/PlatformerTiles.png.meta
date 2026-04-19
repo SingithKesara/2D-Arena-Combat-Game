@@ -64,7 +64,7 @@ TextureImporter:
   spriteMeshType: 1
   alignment: 0
   spritePivot: {x: 0.5, y: 0.5}
-  spritePixelsToUnits: 10
+  spritePixelsToUnits: 32
   spriteBorder: {x: 0, y: 0, z: 0, w: 0}
   spriteGenerateFallbackPhysicsShape: 1
   alphaUsage: 1
@@ -113,14 +113,14 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: StoneTile
+      name: PlatformerTiles_0_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 48
-        width: 16
-        height: 16
-      alignment: 0
+        y: 0
+        width: 64
+        height: 64
+      alignment: 9
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
@@ -128,52 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 2cab907f4b928b745ba11508df93d88e
-      internalID: 21300000
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: BrickTile
-      rect:
-        serializedVersion: 2
-        x: 16
-        y: 48
-        width: 16
-        height: 16
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 4807686958aa9e24790e08efec3d28ce
-      internalID: 21300002
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: BlueprintTile
-      rect:
-        serializedVersion: 2
-        x: 32
-        y: 48
-        width: 16
-        height: 16
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: ff7d7adf649684649a6d235e8be9e4f8
-      internalID: 21300004
+      spriteID: b66683f0b5fdc864faf9074bdaa7861e
+      internalID: 887936055
       vertices: []
       indices: 
       edges: []
@@ -194,6 +150,7 @@ TextureImporter:
     nameFileIdTable:
       BlueprintTile: 21300004
       BrickTile: 21300002
+      PlatformerTiles_0_0: 887936055
       StoneTile: 21300000
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
