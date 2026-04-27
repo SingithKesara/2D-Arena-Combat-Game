@@ -1,41 +1,84 @@
 # 2D Arena Combat Game
-## PUSL3190 Computing Project | 10952382 | Singith Kesara Wahalathanthri
 
-### Quick Start — Run these 7 steps in Unity Editor (Tools → Arena Combat):
+Final Year Project – Unity 6 2D local multiplayer arena fighter.
 
-| Step | Menu Item | What it does |
-|------|-----------|-------------|
-| ① | Setup Layers and Tags | Creates Ground (L6) + Player (L7) layers |
-| ② | Slice Sprite Sheets | Slices knight sprites + imports all UI textures |
-| ③ | Build Animator Controllers | Creates AC_Player1 & AC_Player2 |
-| ④ | Build Gameplay Scene | Builds complete gameplay scene |
-| ⑤ | Fix Physics2D Matrix | Players land on Ground, pass through each other |
-| ⑥ | Clean Stale Files | Removes old duplicate files |
-| ⑦ | Build Main Menu Scene | Creates the MainMenu.unity scene |
+## Overview
+This project is a fast-paced 2D arena fighting game built in Unity 6.  
+It features two local players, animated characters, round-based combat, timed matches, health bars, damage feedback, and a main menu with scene transitions.
 
-After ④ — open Gameplayscene, Ctrl+S, then run ⑤ and ⑦.
-After ⑦ — open MainMenu scene in Scenes folder, press Play.
+## Current Direction
+The project is being upgraded from a functional prototype into a more polished final-year-project presentation build.
 
-### Controls
-| Action | Player 1 | Player 2 |
-|--------|----------|----------|
-| Move | A / D | Numpad 4 / 6 |
-| Jump (double jump) | W or Space | Numpad 8 |
-| Fast Fall | S (while airborne) | Numpad 5 |
-| Light Attack | J | Numpad 0 |
-| Heavy Attack | K | Numpad Enter |
+The new visual direction uses:
+- hand-painted layered backgrounds
+- cleaner platform tiles
+- decorative environment props
+- a redesigned gameplay HUD
+- mixed fighter styles instead of only recolored knights
 
-### Features (per PID / Interim Report requirements)
-- Two playable knight characters (Colour1 & Colour2 freeknight assets)
-- Sprite sheet animations: Idle, Run, Jump, Fall, Light Attack, Heavy Attack, Hit, Death
-- Physics-driven movement with double-jump (Brawlhalla-style)
-- Health system: 100 HP per player, visual health bars (green→yellow→red)
-- 99-second match timer with pulse effect in last 10 seconds
-- Round system: best of 2 rounds, "ROUND X → FIGHT!" intro
-- Win conditions: KO or most HP when timer expires
-- Floating damage numbers on hit
-- Screen flash on heavy hit
-- Layered parallax background
-- Battle BGM + SFX (swing, hit, jump, land, death)
-- Main Menu with controls panel
-- Scene transition with fade effect
+## Main Features
+- Local 2-player fighting
+- Movement, jumping, fast-fall
+- Light and heavy attacks
+- Health bars with smooth reduction and lag effect
+- Round system with timer
+- Match result screen
+- Main menu with controls panel and fade transition
+
+## Controls
+
+### Player 1
+- Move: A / D
+- Jump: W or Space
+- Fast Fall: S
+- Light Attack: J
+- Heavy Attack: K
+
+### Player 2
+- Move: Numpad 4 / 6
+- Jump: Numpad 8
+- Fast Fall: Numpad 5
+- Light Attack: Numpad 0
+- Heavy Attack: Numpad Enter
+
+## Scenes
+- `MainMenu`
+- `GameplayScene`
+
+## Asset Usage
+This project combines multiple asset packs for a more polished arena-fighter presentation:
+
+- `freeknight` for knight fighter visuals
+- `rvros-adventurer` for a second fighter style
+- `freecutetileset` for readable gameplay platforms
+- `2D Hand Painted Platformer Environment` for layered backgrounds and decorative scenery
+- `Free UI build package` for framed HUD elements
+
+## Project Structure
+- `Assets/Scripts` – gameplay, UI, scene, and combat logic
+- `Assets/Scenes` – menu and gameplay scenes
+- `Assets/Animations` – generated animation clips and controllers
+- `Assets/Art` – character and tile assets
+- `Assets/UI` – custom UI textures
+- `Assets/Audio` – music and sound effects
+
+## Scene Flow
+- The Main Menu loads `GameplayScene`
+- The gameplay UI supports rematch and return-to-menu flow
+- The current build keeps menu integration intact while improving gameplay visuals
+
+## Current Upgrade Goals
+- Rebuild the gameplay scene with cleaner art direction
+- Improve character variety
+- Replace placeholder-feel HUD with polished UI assets
+- Remove unused demo and documentation files
+- Keep the main menu and gameplay flow fully connected
+
+## Tech
+- Unity 6
+- C#
+- Unity Input System
+- Sprite animation with Animator Controllers
+
+## Author
+Singith Kesara Wahalathanthri

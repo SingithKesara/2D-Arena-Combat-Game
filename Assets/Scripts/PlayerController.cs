@@ -15,11 +15,19 @@ public class PlayerController : MonoBehaviour
 
     [Header("Ground Detection")]
     public Transform groundCheck;
-    public float groundCheckRadius = 0.12f;
+    public float groundCheckRadius = 0.2f;
     public LayerMask groundLayer;
 
     [Header("Identity")]
     public int playerIndex = 1;
+
+    [Header("Visual Alignment")]
+    public Transform visualRoot;
+    public float visualYOffset = -0.55f;
+
+    [Header("Blast Zone")]
+    public float deathY = -8.5f;
+    public bool dieWhenFallingOut = true;
 
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
@@ -31,10 +39,13 @@ public class PlayerController : MonoBehaviour
     private int _jumpsLeft;
     private const int MAX_JUMPS = 2;
     private bool _facingRight;
+    private bool _fellOutThisLife;
 
     private Rigidbody2D _rb;
     private Animator _anim;
     private CombatSystem _combat;
+    private HealthManager _health;
+    private Collider2D _col;
 
     private static readonly int H_Jump = Animator.StringToHash("jump");
     private static readonly int H_Hit = Animator.StringToHash("hit");
@@ -45,6 +56,16 @@ public class PlayerController : MonoBehaviour
         _rb = GetComponent<Rigidbody2D>();
         _anim = GetComponent<Animator>();
         _combat = GetComponent<CombatSystem>();
+        _health = GetComponent<HealthManager>();
+        _col = GetComponent<Collider2D>();
+
+        if (visualRoot == null)
+        {
+            Transform found = transform.Find("Visual");
+            if (found != null) visualRoot = found;
+        }
+
+        ApplyVisualOffset();
 
         _rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
@@ -61,6 +82,7 @@ public class PlayerController : MonoBehaviour
 
         ReadInput();
         CheckGround();
+        CheckFallDeath();
     }
 
     private void FixedUpdate()
@@ -131,19 +153,21 @@ public class PlayerController : MonoBehaviour
     {
         bool wasGrounded = isGrounded;
 
-        if (groundCheck == null)
+        bool circleGrounded = false;
+        if (groundCheck != null)
         {
-            isGrounded = false;
-            return;
+            circleGrounded = Physics2D.OverlapCircle(
+                groundCheck.position,
+                groundCheckRadius,
+                groundLayer
+            );
         }
 
-        isGrounded = Physics2D.OverlapCircle(
-            groundCheck.position,
-            groundCheckRadius,
-            groundLayer
-        );
+        bool touchingGround = _col != null && _col.IsTouchingLayers(groundLayer);
 
-        if (isGrounded && !wasGrounded)
+        isGrounded = circleGrounded || touchingGround;
+
+        if (isGrounded)
         {
             _jumpsLeft = MAX_JUMPS;
         }
@@ -164,9 +188,21 @@ public class PlayerController : MonoBehaviour
     private void ClampFall()
     {
         if (_rb.linearVelocity.y < maxFallSpeed)
-        {
             _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, maxFallSpeed);
-        }
+    }
+
+    private void CheckFallDeath()
+    {
+        if (!dieWhenFallingOut) return;
+        if (_fellOutThisLife) return;
+        if (transform.position.y > deathY) return;
+
+        _fellOutThisLife = true;
+
+        if (_health != null)
+            _health.TakeDamage(9999, Vector2.zero);
+        else
+            OnDeath();
     }
 
     private void SetFacing(bool right)
@@ -183,6 +219,15 @@ public class PlayerController : MonoBehaviour
         transform.localScale = s;
     }
 
+    private void ApplyVisualOffset()
+    {
+        if (visualRoot == null) return;
+
+        Vector3 local = visualRoot.localPosition;
+        local.y = visualYOffset;
+        visualRoot.localPosition = local;
+    }
+
     public void FaceTarget(Transform target)
     {
         if (target == null) return;
@@ -192,7 +237,7 @@ public class PlayerController : MonoBehaviour
     private void TryJump()
     {
         if (isAttacking || isDead) return;
-        if (_jumpsLeft <= 0) return;
+        if (_jumpsLeft <= 0 && !isGrounded) return;
 
         _jumpsLeft--;
         isGrounded = false;
@@ -220,6 +265,8 @@ public class PlayerController : MonoBehaviour
 
     public void OnDeath()
     {
+        if (isDead) return;
+
         isDead = true;
         _rb.linearVelocity = Vector2.zero;
         _rb.bodyType = RigidbodyType2D.Kinematic;
@@ -231,12 +278,15 @@ public class PlayerController : MonoBehaviour
         isDead = false;
         isAttacking = false;
         isGrounded = false;
+        _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
         _move = Vector2.zero;
 
         _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
         transform.position = spawnPos;
+
+        ApplyVisualOffset();
 
         _anim.Rebind();
         _anim.Update(0f);
@@ -247,18 +297,28 @@ public class PlayerController : MonoBehaviour
         isDead = false;
         isAttacking = false;
         isGrounded = false;
+        _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
         _move = Vector2.zero;
 
         _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
+
+        ApplyVisualOffset();
     }
 
     private void OnDrawGizmosSelected()
     {
-        if (groundCheck == null) return;
+        if (groundCheck != null)
+        {
+            Gizmos.color = isGrounded ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        }
 
-        Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        Gizmos.color = Color.magenta;
+        Gizmos.DrawLine(
+            new Vector3(-20f, deathY, 0f),
+            new Vector3(20f, deathY, 0f)
+        );
     }
 }
