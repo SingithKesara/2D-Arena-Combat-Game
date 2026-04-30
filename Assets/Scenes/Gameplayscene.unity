@@ -1911,6 +1911,7 @@ GameObject:
   - component: {fileID: 1043041442}
   - component: {fileID: 1043041441}
   - component: {fileID: 1043041445}
+  - component: {fileID: 1043041446}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -2048,6 +2049,37 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!114 &1043041446
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1043041440}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc18ccc14a3720b4ea2f70c3c4ccb19f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ArenaCameraController
+  player1: {fileID: 2083586747}
+  player2: {fileID: 2131996607}
+  autoFindPlayers: 1
+  followSmooth: 6
+  verticalOffset: 0.45
+  zoomSmooth: 5
+  minOrthographicSize: 4.7
+  maxOrthographicSize: 6.8
+  horizontalPadding: 2
+  verticalPadding: 1.6
+  useCameraLimits: 1
+  minCenterX: -1.4
+  maxCenterX: 1.4
+  minCenterY: -0.2
+  maxCenterY: 1.5
+  ignoreDeadPlayers: 1
+  ignorePlayersBelowLimit: 1
+  ignoreBelowY: -6.5
+  snapOnStart: 1
 --- !u!1 &1051296641
 GameObject:
   m_ObjectHideFlags: 0
