@@ -17,6 +17,8 @@ public class PlayerController : MonoBehaviour
     public Transform groundCheck;
     public float groundCheckRadius = 0.2f;
     public LayerMask groundLayer;
+    public float groundBoxDistance = 0.08f;
+    public float groundLockAfterJump = 0.12f;
 
     [Header("Identity")]
     public int playerIndex = 1;
@@ -38,8 +40,10 @@ public class PlayerController : MonoBehaviour
     private Vector2 _move;
     private int _jumpsLeft;
     private const int MAX_JUMPS = 2;
+
     private bool _facingRight;
     private bool _fellOutThisLife;
+    private float _groundLockTimer;
 
     private Rigidbody2D _rb;
     private Animator _anim;
@@ -47,6 +51,10 @@ public class PlayerController : MonoBehaviour
     private HealthManager _health;
     private Collider2D _col;
 
+    private static readonly int H_IsMoving = Animator.StringToHash("isMoving");
+    private static readonly int H_IsRunning = Animator.StringToHash("isRunning");
+    private static readonly int H_IsGrounded = Animator.StringToHash("isGrounded");
+    private static readonly int H_VelocityY = Animator.StringToHash("velocityY");
     private static readonly int H_Jump = Animator.StringToHash("jump");
     private static readonly int H_Hit = Animator.StringToHash("hit");
     private static readonly int H_Death = Animator.StringToHash("death");
@@ -62,11 +70,13 @@ public class PlayerController : MonoBehaviour
         if (visualRoot == null)
         {
             Transform found = transform.Find("Visual");
-            if (found != null) visualRoot = found;
+            if (found != null)
+                visualRoot = found;
         }
 
         ApplyVisualOffset();
 
+        _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         _rb.interpolation = RigidbodyInterpolation2D.Interpolate;
@@ -81,19 +91,20 @@ public class PlayerController : MonoBehaviour
         if (isDead) return;
 
         ReadInput();
-        CheckGround();
         CheckFallDeath();
+        UpdateAnimator();
     }
 
     private void FixedUpdate()
     {
         if (isDead) return;
 
+        if (_groundLockTimer > 0f)
+            _groundLockTimer -= Time.fixedDeltaTime;
+
+        CheckGround();
         ApplyMovement();
         ClampFall();
-
-        if (Mathf.Abs(_rb.linearVelocity.x) < 0.1f)
-            _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
     }
 
     private void ReadInput()
@@ -153,6 +164,12 @@ public class PlayerController : MonoBehaviour
     {
         bool wasGrounded = isGrounded;
 
+        if (_groundLockTimer > 0f)
+        {
+            isGrounded = false;
+            return;
+        }
+
         bool circleGrounded = false;
         if (groundCheck != null)
         {
@@ -163,13 +180,36 @@ public class PlayerController : MonoBehaviour
             );
         }
 
-        bool touchingGround = _col != null && _col.IsTouchingLayers(groundLayer);
+        bool boxGrounded = false;
+        if (_col != null)
+        {
+            Bounds b = _col.bounds;
 
-        isGrounded = circleGrounded || touchingGround;
+            Vector2 boxOrigin = new Vector2(b.center.x, b.min.y + 0.03f);
+            Vector2 boxSize = new Vector2(b.size.x * 0.72f, 0.08f);
+
+            RaycastHit2D hit = Physics2D.BoxCast(
+                boxOrigin,
+                boxSize,
+                0f,
+                Vector2.down,
+                groundBoxDistance,
+                groundLayer
+            );
+
+            boxGrounded = hit.collider != null;
+        }
+
+        bool movingDownOrStill = _rb.linearVelocity.y <= 0.25f;
+
+        isGrounded = movingDownOrStill && (circleGrounded || boxGrounded);
 
         if (isGrounded)
         {
             _jumpsLeft = MAX_JUMPS;
+
+            if (!wasGrounded && _rb.linearVelocity.y < 0f)
+                _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
         }
     }
 
@@ -189,6 +229,41 @@ public class PlayerController : MonoBehaviour
     {
         if (_rb.linearVelocity.y < maxFallSpeed)
             _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, maxFallSpeed);
+    }
+
+    private void TryJump()
+    {
+        if (isAttacking || isDead) return;
+        if (_jumpsLeft <= 0) return;
+
+        _jumpsLeft--;
+        isGrounded = false;
+        _groundLockTimer = groundLockAfterJump;
+
+        _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
+        _anim.SetTrigger(H_Jump);
+    }
+
+    private void TryLightAttack()
+    {
+        if (isAttacking || isDead || _combat == null) return;
+        _combat.DoLightAttack();
+    }
+
+    private void TryHeavyAttack()
+    {
+        if (isAttacking || isDead || _combat == null) return;
+        _combat.DoHeavyAttack();
+    }
+
+    private void UpdateAnimator()
+    {
+        if (_anim == null) return;
+
+        _anim.SetBool(H_IsGrounded, isGrounded);
+        _anim.SetBool(H_IsMoving, Mathf.Abs(_move.x) > 0.1f);
+        _anim.SetBool(H_IsRunning, Mathf.Abs(_move.x) > 0.5f);
+        _anim.SetFloat(H_VelocityY, _rb.linearVelocity.y);
     }
 
     private void CheckFallDeath()
@@ -234,33 +309,10 @@ public class PlayerController : MonoBehaviour
         SetFacing(target.position.x > transform.position.x);
     }
 
-    private void TryJump()
-    {
-        if (isAttacking || isDead) return;
-        if (_jumpsLeft <= 0 && !isGrounded) return;
-
-        _jumpsLeft--;
-        isGrounded = false;
-
-        _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
-        _anim.SetTrigger(H_Jump);
-    }
-
-    private void TryLightAttack()
-    {
-        if (isAttacking || isDead || _combat == null) return;
-        _combat.DoLightAttack();
-    }
-
-    private void TryHeavyAttack()
-    {
-        if (isAttacking || isDead || _combat == null) return;
-        _combat.DoHeavyAttack();
-    }
-
     public void OnHitReceived()
     {
-        _anim.SetTrigger(H_Hit);
+        if (_anim != null)
+            _anim.SetTrigger(H_Hit);
     }
 
     public void OnDeath()
@@ -270,7 +322,9 @@ public class PlayerController : MonoBehaviour
         isDead = true;
         _rb.linearVelocity = Vector2.zero;
         _rb.bodyType = RigidbodyType2D.Kinematic;
-        _anim.SetTrigger(H_Death);
+
+        if (_anim != null)
+            _anim.SetTrigger(H_Death);
     }
 
     public void ResetForNewRound(Vector3 spawnPos)
@@ -281,6 +335,7 @@ public class PlayerController : MonoBehaviour
         _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
         _move = Vector2.zero;
+        _groundLockTimer = 0f;
 
         _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
@@ -288,8 +343,11 @@ public class PlayerController : MonoBehaviour
 
         ApplyVisualOffset();
 
-        _anim.Rebind();
-        _anim.Update(0f);
+        if (_anim != null)
+        {
+            _anim.Rebind();
+            _anim.Update(0f);
+        }
     }
 
     public void ResetState()
@@ -300,6 +358,7 @@ public class PlayerController : MonoBehaviour
         _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
         _move = Vector2.zero;
+        _groundLockTimer = 0f;
 
         _rb.bodyType = RigidbodyType2D.Dynamic;
         _rb.linearVelocity = Vector2.zero;
@@ -313,6 +372,16 @@ public class PlayerController : MonoBehaviour
         {
             Gizmos.color = isGrounded ? Color.green : Color.red;
             Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        }
+
+        if (_col != null)
+        {
+            Bounds b = _col.bounds;
+            Vector2 boxOrigin = new Vector2(b.center.x, b.min.y + 0.03f);
+            Vector2 boxSize = new Vector2(b.size.x * 0.72f, 0.08f);
+
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireCube(boxOrigin + Vector2.down * groundBoxDistance, boxSize);
         }
 
         Gizmos.color = Color.magenta;
