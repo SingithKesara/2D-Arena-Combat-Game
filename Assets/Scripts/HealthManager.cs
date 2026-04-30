@@ -11,6 +11,7 @@ public class HealthManager : MonoBehaviour
     public float iFrameDuration = 0.25f;
 
     public int CurrentHealth { get; private set; }
+    public bool IsInvincible => _isInvincible;
 
     public event Action<int, int> OnHealthChanged;
     public event Action OnDied;
@@ -29,11 +30,11 @@ public class HealthManager : MonoBehaviour
 
     private void Update()
     {
-        if (_isInvincible)
-        {
-            _iFrameTimer -= Time.deltaTime;
-            if (_iFrameTimer <= 0f) _isInvincible = false;
-        }
+        if (!_isInvincible) return;
+
+        _iFrameTimer -= Time.deltaTime;
+        if (_iFrameTimer <= 0f)
+            _isInvincible = false;
     }
 
     public void TakeDamage(int amount, Vector2 knockback)
@@ -43,8 +44,11 @@ public class HealthManager : MonoBehaviour
         CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
         OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
 
-        _rb.linearVelocity = Vector2.zero;
-        _rb.AddForce(knockback, ForceMode2D.Impulse);
+        if (_rb != null)
+        {
+            _rb.linearVelocity = Vector2.zero;
+            _rb.AddForce(knockback, ForceMode2D.Impulse);
+        }
 
         _pc.OnHitReceived();
 
@@ -55,11 +59,25 @@ public class HealthManager : MonoBehaviour
             Die();
     }
 
+    public void ForceDeath()
+    {
+        if (_pc != null && _pc.isDead) return;
+
+        CurrentHealth = 0;
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+
+        Die();
+    }
+
     private void Die()
     {
+        if (_pc == null) return;
+        if (_pc.isDead) return;
+
         _pc.OnDeath();
         OnDied?.Invoke();
-        if (GameStateManager.Instance != null && _pc != null)
+
+        if (GameStateManager.Instance != null)
             GameStateManager.Instance.OnPlayerDied(_pc.playerIndex);
     }
 
@@ -68,6 +86,7 @@ public class HealthManager : MonoBehaviour
         CurrentHealth = maxHealth;
         _isInvincible = false;
         _iFrameTimer = 0f;
+
         OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
     }
 }

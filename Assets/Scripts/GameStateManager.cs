@@ -194,7 +194,7 @@ public class GameStateManager : MonoBehaviour
 
     private void LockPlayers(bool locked)
     {
-        if (player1 != null) player1.isAttacking = locked;
-        if (player2 != null) player2.isAttacking = locked;
+        if (player1 != null) player1.SetControlsLocked(locked);
+        if (player2 != null) player2.SetControlsLocked(locked);
     }
 }

@@ -17,8 +17,8 @@ public class PlayerController : MonoBehaviour
     public Transform groundCheck;
     public float groundCheckRadius = 0.2f;
     public LayerMask groundLayer;
-    public float groundBoxDistance = 0.08f;
-    public float groundLockAfterJump = 0.12f;
+    public float groundBoxDistance = 0.14f;
+    public float groundLockAfterJump = 0.10f;
 
     [Header("Identity")]
     public int playerIndex = 1;
@@ -31,16 +31,19 @@ public class PlayerController : MonoBehaviour
     public float deathY = -8.5f;
     public bool dieWhenFallingOut = true;
 
+    [Header("Runtime State")]
+    public bool controlsLocked;
+
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
     [HideInInspector] public bool isDead;
 
     public float MoveX => _move.x;
 
-    private Vector2 _move;
-    private int _jumpsLeft;
     private const int MAX_JUMPS = 2;
 
+    private Vector2 _move;
+    private int _jumpsLeft;
     private bool _facingRight;
     private bool _fellOutThisLife;
     private float _groundLockTimer;
@@ -50,6 +53,8 @@ public class PlayerController : MonoBehaviour
     private CombatSystem _combat;
     private HealthManager _health;
     private Collider2D _col;
+
+    private readonly RaycastHit2D[] _groundHits = new RaycastHit2D[8];
 
     private static readonly int H_IsMoving = Animator.StringToHash("isMoving");
     private static readonly int H_IsRunning = Animator.StringToHash("isRunning");
@@ -70,8 +75,7 @@ public class PlayerController : MonoBehaviour
         if (visualRoot == null)
         {
             Transform found = transform.Find("Visual");
-            if (found != null)
-                visualRoot = found;
+            if (found != null) visualRoot = found;
         }
 
         ApplyVisualOffset();
@@ -92,7 +96,6 @@ public class PlayerController : MonoBehaviour
 
         ReadInput();
         CheckFallDeath();
-        UpdateAnimator();
     }
 
     private void FixedUpdate()
@@ -105,12 +108,19 @@ public class PlayerController : MonoBehaviour
         CheckGround();
         ApplyMovement();
         ClampFall();
+        UpdateAnimator();
     }
 
     private void ReadInput()
     {
         Keyboard kb = Keyboard.current;
         if (kb == null) return;
+
+        if (controlsLocked)
+        {
+            _move = Vector2.zero;
+            return;
+        }
 
         float x = 0f;
         float y = 0f;
@@ -171,6 +181,7 @@ public class PlayerController : MonoBehaviour
         }
 
         bool circleGrounded = false;
+
         if (groundCheck != null)
         {
             circleGrounded = Physics2D.OverlapCircle(
@@ -180,29 +191,50 @@ public class PlayerController : MonoBehaviour
             );
         }
 
-        bool boxGrounded = false;
+        bool castGrounded = false;
+
+        if (_col != null)
+        {
+            ContactFilter2D filter = new ContactFilter2D();
+            filter.SetLayerMask(groundLayer);
+            filter.useTriggers = false;
+
+            int count = _col.Cast(Vector2.down, filter, _groundHits, groundBoxDistance);
+
+            for (int i = 0; i < count; i++)
+            {
+                if (_groundHits[i].collider == null) continue;
+
+                if (_groundHits[i].normal.y > 0.35f)
+                {
+                    castGrounded = true;
+                    break;
+                }
+            }
+        }
+
+        bool overlapGrounded = false;
+
         if (_col != null)
         {
             Bounds b = _col.bounds;
 
-            Vector2 boxOrigin = new Vector2(b.center.x, b.min.y + 0.03f);
-            Vector2 boxSize = new Vector2(b.size.x * 0.72f, 0.08f);
+            Vector2 footCenter = new Vector2(b.center.x, b.min.y + 0.04f);
+            Vector2 footSize = new Vector2(b.size.x * 0.75f, 0.10f);
 
-            RaycastHit2D hit = Physics2D.BoxCast(
-                boxOrigin,
-                boxSize,
+            Collider2D overlap = Physics2D.OverlapBox(
+                footCenter,
+                footSize,
                 0f,
-                Vector2.down,
-                groundBoxDistance,
                 groundLayer
             );
 
-            boxGrounded = hit.collider != null;
+            overlapGrounded = overlap != null;
         }
 
-        bool movingDownOrStill = _rb.linearVelocity.y <= 0.25f;
+        bool movingDownOrStill = _rb.linearVelocity.y <= 0.5f;
 
-        isGrounded = movingDownOrStill && (circleGrounded || boxGrounded);
+        isGrounded = movingDownOrStill && (circleGrounded || castGrounded || overlapGrounded);
 
         if (isGrounded)
         {
@@ -215,7 +247,7 @@ public class PlayerController : MonoBehaviour
 
     private void ApplyMovement()
     {
-        if (isAttacking)
+        if (controlsLocked || isAttacking)
         {
             _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
             return;
@@ -233,7 +265,11 @@ public class PlayerController : MonoBehaviour
 
     private void TryJump()
     {
-        if (isAttacking || isDead) return;
+        if (controlsLocked || isAttacking || isDead) return;
+
+        if (isGrounded)
+            _jumpsLeft = MAX_JUMPS;
+
         if (_jumpsLeft <= 0) return;
 
         _jumpsLeft--;
@@ -246,13 +282,13 @@ public class PlayerController : MonoBehaviour
 
     private void TryLightAttack()
     {
-        if (isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || _combat == null) return;
         _combat.DoLightAttack();
     }
 
     private void TryHeavyAttack()
     {
-        if (isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || _combat == null) return;
         _combat.DoHeavyAttack();
     }
 
@@ -275,14 +311,28 @@ public class PlayerController : MonoBehaviour
         _fellOutThisLife = true;
 
         if (_health != null)
-            _health.TakeDamage(9999, Vector2.zero);
+            _health.ForceDeath();
         else
             OnDeath();
+    }
+
+    public void SetControlsLocked(bool locked)
+    {
+        controlsLocked = locked;
+
+        if (locked)
+        {
+            _move = Vector2.zero;
+
+            if (_rb != null)
+                _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
+        }
     }
 
     private void SetFacing(bool right)
     {
         if (_facingRight == right) return;
+
         _facingRight = right;
         ApplyFacing();
     }
@@ -320,6 +370,9 @@ public class PlayerController : MonoBehaviour
         if (isDead) return;
 
         isDead = true;
+        controlsLocked = true;
+        isAttacking = false;
+
         _rb.linearVelocity = Vector2.zero;
         _rb.bodyType = RigidbodyType2D.Kinematic;
 
@@ -331,6 +384,7 @@ public class PlayerController : MonoBehaviour
     {
         isDead = false;
         isAttacking = false;
+        controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
@@ -354,6 +408,7 @@ public class PlayerController : MonoBehaviour
     {
         isDead = false;
         isAttacking = false;
+        controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;
         _jumpsLeft = MAX_JUMPS;
@@ -377,11 +432,12 @@ public class PlayerController : MonoBehaviour
         if (_col != null)
         {
             Bounds b = _col.bounds;
-            Vector2 boxOrigin = new Vector2(b.center.x, b.min.y + 0.03f);
-            Vector2 boxSize = new Vector2(b.size.x * 0.72f, 0.08f);
+
+            Vector2 footCenter = new Vector2(b.center.x, b.min.y + 0.04f);
+            Vector2 footSize = new Vector2(b.size.x * 0.75f, 0.10f);
 
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireCube(boxOrigin + Vector2.down * groundBoxDistance, boxSize);
+            Gizmos.DrawWireCube(footCenter, footSize);
         }
 
         Gizmos.color = Color.magenta;

@@ -42,28 +42,44 @@ public class CombatSystem : MonoBehaviour
 
     public void DoLightAttack()
     {
-        if (_pc == null || _pc.isDead || _pc.isAttacking) return;
+        if (!CanAttack()) return;
+
         StartCoroutine(AttackRoutine(
-            damage: lightDamage,
-            radius: lightAttackRadius,
-            knockbackForce: lightKnockback,
-            startup: lightStartup,
-            cooldown: lightCooldown,
-            animHash: H_LightAttack
+            lightDamage,
+            lightAttackRadius,
+            lightKnockback,
+            lightStartup,
+            lightCooldown,
+            H_LightAttack
         ));
     }
 
     public void DoHeavyAttack()
     {
-        if (_pc == null || _pc.isDead || _pc.isAttacking) return;
+        if (!CanAttack()) return;
+
         StartCoroutine(AttackRoutine(
-            damage: heavyDamage,
-            radius: heavyAttackRadius,
-            knockbackForce: heavyKnockback,
-            startup: heavyStartup,
-            cooldown: heavyCooldown,
-            animHash: H_HeavyAttack
+            heavyDamage,
+            heavyAttackRadius,
+            heavyKnockback,
+            heavyStartup,
+            heavyCooldown,
+            H_HeavyAttack
         ));
+    }
+
+    private bool CanAttack()
+    {
+        if (_pc == null) return false;
+        if (_pc.isDead) return false;
+        if (_pc.isAttacking) return false;
+        if (_pc.controlsLocked) return false;
+
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.State != GameStateManager.MatchState.Fighting)
+            return false;
+
+        return true;
     }
 
     private IEnumerator AttackRoutine(
@@ -75,52 +91,74 @@ public class CombatSystem : MonoBehaviour
         int animHash)
     {
         _pc.isAttacking = true;
-        _anim.SetTrigger(animHash);
+
+        if (_anim != null)
+            _anim.SetTrigger(animHash);
 
         yield return new WaitForSeconds(startup);
 
-        if (attackPoint != null)
-        {
-            Collider2D[] hits = Physics2D.OverlapCircleAll(
-                attackPoint.position,
-                radius,
-                playerLayer
-            );
-
-            foreach (Collider2D hit in hits)
-            {
-                if (hit.gameObject == gameObject) continue;
-
-                HealthManager hm = hit.GetComponent<HealthManager>();
-                if (hm == null) continue;
-
-                Vector2 dir = (hit.transform.position - transform.position).normalized;
-                if (Mathf.Abs(dir.x) < 0.1f)
-                    dir.x = transform.localScale.x >= 0f ? 1f : -1f;
-
-                Vector2 knockback = new Vector2(
-                    dir.x * knockbackForce,
-                    knockbackForce * upwardBias
-                );
-
-                hm.TakeDamage(damage, knockback);
-
-                if (HitStop.Instance != null)
-                    HitStop.Instance.DoHitStop(0.08f);
-
-                if (CameraShake.Instance != null)
-                    CameraShake.Instance.Shake(0.12f, 0.25f);
-
-                if (HitEffect.Instance != null)
-                    HitEffect.Instance.Spawn(hit.transform.position);
-
-                hit.transform.position += (Vector3)(new Vector2(Mathf.Sign(dir.x), 0f) * 0.25f);
-                break;
-            }
-        }
+        if (CanAttackDuringActiveFrame())
+            PerformHitCheck(damage, radius, knockbackForce);
 
         yield return new WaitForSeconds(cooldown);
-        _pc.isAttacking = false;
+
+        if (_pc != null)
+            _pc.isAttacking = false;
+    }
+
+    private bool CanAttackDuringActiveFrame()
+    {
+        if (_pc == null) return false;
+        if (_pc.isDead) return false;
+        if (_pc.controlsLocked) return false;
+
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.State != GameStateManager.MatchState.Fighting)
+            return false;
+
+        return true;
+    }
+
+    private void PerformHitCheck(int damage, float radius, float knockbackForce)
+    {
+        if (attackPoint == null) return;
+
+        Collider2D[] hits = Physics2D.OverlapCircleAll(
+            attackPoint.position,
+            radius,
+            playerLayer
+        );
+
+        foreach (Collider2D hit in hits)
+        {
+            if (hit.gameObject == gameObject) continue;
+
+            HealthManager hm = hit.GetComponent<HealthManager>();
+            if (hm == null) continue;
+
+            Vector2 dir = (hit.transform.position - transform.position).normalized;
+
+            if (Mathf.Abs(dir.x) < 0.1f)
+                dir.x = transform.localScale.x >= 0f ? 1f : -1f;
+
+            Vector2 knockback = new Vector2(
+                dir.x * knockbackForce,
+                knockbackForce * upwardBias
+            );
+
+            hm.TakeDamage(damage, knockback);
+
+            if (HitStop.Instance != null)
+                HitStop.Instance.DoHitStop(0.08f);
+
+            if (CameraShake.Instance != null)
+                CameraShake.Instance.Shake(0.12f, 0.25f);
+
+            if (HitEffect.Instance != null)
+                HitEffect.Instance.Spawn(hit.transform.position);
+
+            break;
+        }
     }
 
     private void OnDrawGizmosSelected()
