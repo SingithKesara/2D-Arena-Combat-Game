@@ -5,30 +5,39 @@ public class CameraShake : MonoBehaviour
 {
     public static CameraShake Instance;
 
-    private Vector3 originalPos;
+    public Vector3 CurrentOffset { get; private set; }
+
+    private Coroutine _shakeRoutine;
 
     private void Awake()
     {
         Instance = this;
-        originalPos = transform.localPosition;
+        CurrentOffset = Vector3.zero;
     }
 
     public void Shake(float duration, float strength)
     {
-        StartCoroutine(ShakeRoutine(duration, strength));
+        if (_shakeRoutine != null)
+            StopCoroutine(_shakeRoutine);
+
+        _shakeRoutine = StartCoroutine(ShakeRoutine(duration, strength));
     }
 
-    IEnumerator ShakeRoutine(float duration, float strength)
+    private IEnumerator ShakeRoutine(float duration, float strength)
     {
         float t = 0f;
 
         while (t < duration)
         {
-            t += Time.deltaTime;
-            transform.localPosition = originalPos + Random.insideUnitSphere * strength;
+            t += Time.unscaledDeltaTime;
+
+            Vector2 random = Random.insideUnitCircle * strength;
+            CurrentOffset = new Vector3(random.x, random.y, 0f);
+
             yield return null;
         }
 
-        transform.localPosition = originalPos;
+        CurrentOffset = Vector3.zero;
+        _shakeRoutine = null;
     }
 }
