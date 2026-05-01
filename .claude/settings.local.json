@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py --version)",
+      "Bash(pdftotext -layout \"D:/NSBM/FYP/10952382_Proposal.pdf\" \"/tmp/proposal.txt\")",
+      "Read(//tmp/**)",
+      "Bash(pdftotext -layout \"D:/NSBM/FYP/10952382_PID.pdf\" \"/tmp/pid.txt\")",
+      "Bash(pdftotext -layout \"D:/NSBM/FYP/10952382_Interim.pdf\" \"/tmp/interim.txt\")",
+      "Bash(cygpath -w /tmp/proposal.txt)"
+    ]
+  }
+}

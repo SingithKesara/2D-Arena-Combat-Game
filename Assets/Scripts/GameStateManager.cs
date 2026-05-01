@@ -89,6 +89,9 @@ public class GameStateManager : MonoBehaviour
         OnTimerUpdate?.Invoke(_timeRemaining);
         State = MatchState.Fighting;
         OnRoundStart?.Invoke();
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayRoundStart();
     }
 
     public void OnPlayerDied(int deadPlayerIndex)

@@ -9,7 +9,7 @@ using UnityEngine;
 public class ArenaManager : MonoBehaviour
 {
     [Header("Death Zone")]
-    public float deathZoneY = -12f;    // Y below which a player dies instantly
+    public float deathZoneY = -8.5f;    // Y below which a player dies instantly
 
     [Header("Camera Tracking")]
     public Camera     arenaCamera;
@@ -41,15 +41,15 @@ public class ArenaManager : MonoBehaviour
     private void CheckPlayer(Transform t)
     {
         if (t == null) return;
-        if (t.position.y < deathZoneY)
-        {
-            HealthManager hm = t.GetComponent<HealthManager>();
-            if (hm != null && !t.GetComponent<PlayerController>().isDead)
-            {
-                // Kill instantly with no knockback
-                hm.TakeDamage(9999, Vector2.zero);
-            }
-        }
+        if (t.position.y >= deathZoneY) return;
+
+        PlayerController pc = t.GetComponent<PlayerController>();
+        if (pc == null || pc.isDead) return;
+
+        HealthManager hm = t.GetComponent<HealthManager>();
+        if (hm == null) return;
+
+        hm.ForceDeath();
     }
 
     // ─────────────── Camera tracking ─────────────────────────

@@ -29,7 +29,9 @@ public class CombatSystem : MonoBehaviour
     public float heavyCooldown = 0.38f;
 
     private PlayerController _pc;
+    private HealthManager _health;
     private Animator _anim;
+    private Coroutine _activeAttack;
 
     private static readonly int H_LightAttack = Animator.StringToHash("lightAttack");
     private static readonly int H_HeavyAttack = Animator.StringToHash("heavyAttack");
@@ -37,20 +39,34 @@ public class CombatSystem : MonoBehaviour
     private void Awake()
     {
         _pc = GetComponent<PlayerController>();
+        _health = GetComponent<HealthManager>();
         _anim = GetComponent<Animator>();
+    }
+
+    private void OnEnable()
+    {
+        if (_health != null)
+            _health.OnHealthChanged += OnSelfHealthChanged;
+    }
+
+    private void OnDisable()
+    {
+        if (_health != null)
+            _health.OnHealthChanged -= OnSelfHealthChanged;
     }
 
     public void DoLightAttack()
     {
         if (!CanAttack()) return;
 
-        StartCoroutine(AttackRoutine(
+        _activeAttack = StartCoroutine(AttackRoutine(
             lightDamage,
             lightAttackRadius,
             lightKnockback,
             lightStartup,
             lightCooldown,
-            H_LightAttack
+            H_LightAttack,
+            isHeavy: false
         ));
     }
 
@@ -58,14 +74,38 @@ public class CombatSystem : MonoBehaviour
     {
         if (!CanAttack()) return;
 
-        StartCoroutine(AttackRoutine(
+        _activeAttack = StartCoroutine(AttackRoutine(
             heavyDamage,
             heavyAttackRadius,
             heavyKnockback,
             heavyStartup,
             heavyCooldown,
-            H_HeavyAttack
+            H_HeavyAttack,
+            isHeavy: true
         ));
+    }
+
+    private int _lastSelfHealth = -1;
+
+    private void OnSelfHealthChanged(int current, int max)
+    {
+        if (_lastSelfHealth < 0)
+        {
+            _lastSelfHealth = current;
+            return;
+        }
+
+        bool tookDamage = current < _lastSelfHealth;
+        _lastSelfHealth = current;
+
+        if (tookDamage && _activeAttack != null)
+        {
+            StopCoroutine(_activeAttack);
+            _activeAttack = null;
+
+            if (_pc != null)
+                _pc.isAttacking = false;
+        }
     }
 
     private bool CanAttack()
@@ -88,22 +128,31 @@ public class CombatSystem : MonoBehaviour
         float knockbackForce,
         float startup,
         float cooldown,
-        int animHash)
+        int animHash,
+        bool isHeavy)
     {
         _pc.isAttacking = true;
 
         if (_anim != null)
             _anim.SetTrigger(animHash);
 
+        if (AudioManager.Instance != null)
+        {
+            if (isHeavy) AudioManager.Instance.PlayHeavySwing();
+            else AudioManager.Instance.PlayLightSwing();
+        }
+
         yield return new WaitForSeconds(startup);
 
         if (CanAttackDuringActiveFrame())
-            PerformHitCheck(damage, radius, knockbackForce);
+            PerformHitCheck(damage, radius, knockbackForce, isHeavy);
 
         yield return new WaitForSeconds(cooldown);
 
         if (_pc != null)
             _pc.isAttacking = false;
+
+        _activeAttack = null;
     }
 
     private bool CanAttackDuringActiveFrame()
@@ -119,7 +168,7 @@ public class CombatSystem : MonoBehaviour
         return true;
     }
 
-    private void PerformHitCheck(int damage, float radius, float knockbackForce)
+    private void PerformHitCheck(int damage, float radius, float knockbackForce, bool isHeavy)
     {
         if (attackPoint == null) return;
 
@@ -136,6 +185,8 @@ public class CombatSystem : MonoBehaviour
             HealthManager hm = hit.GetComponent<HealthManager>();
             if (hm == null) continue;
 
+            if (hm.IsInvincible) continue;
+
             Vector2 dir = (hit.transform.position - transform.position).normalized;
 
             if (Mathf.Abs(dir.x) < 0.1f)
@@ -148,14 +199,23 @@ public class CombatSystem : MonoBehaviour
 
             hm.TakeDamage(damage, knockback);
 
+            if (AudioManager.Instance != null)
+            {
+                if (isHeavy) AudioManager.Instance.PlayHeavyHit();
+                else AudioManager.Instance.PlayLightHit();
+            }
+
             if (HitStop.Instance != null)
-                HitStop.Instance.DoHitStop(0.08f);
+                HitStop.Instance.DoHitStop(isHeavy ? 0.12f : 0.08f);
 
             if (CameraShake.Instance != null)
-                CameraShake.Instance.Shake(0.12f, 0.25f);
+                CameraShake.Instance.Shake(isHeavy ? 0.18f : 0.12f, isHeavy ? 0.36f : 0.25f);
 
             if (HitEffect.Instance != null)
                 HitEffect.Instance.Spawn(hit.transform.position);
+
+            if (ScreenFlash.Instance != null)
+                ScreenFlash.Instance.Flash(isHeavy);
 
             break;
         }

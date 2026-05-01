@@ -240,8 +240,16 @@ public class PlayerController : MonoBehaviour
         {
             _jumpsLeft = MAX_JUMPS;
 
-            if (!wasGrounded && _rb.linearVelocity.y < 0f)
-                _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
+            if (!wasGrounded)
+            {
+                float impactVy = _rb.linearVelocity.y;
+
+                if (impactVy < 0f)
+                    _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
+
+                if (impactVy < -6f && AudioManager.Instance != null)
+                    AudioManager.Instance.PlayLand();
+            }
         }
     }
 
@@ -278,6 +286,9 @@ public class PlayerController : MonoBehaviour
 
         _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
         _anim.SetTrigger(H_Jump);
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayJump();
     }
 
     private void TryLightAttack()
@@ -378,6 +389,9 @@ public class PlayerController : MonoBehaviour
 
         if (_anim != null)
             _anim.SetTrigger(H_Death);
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayDeath();
     }
 
     public void ResetForNewRound(Vector3 spawnPos)
