@@ -14,44 +14,69 @@ Files changed:
 - Assets/Scripts/UIManager.cs
 - Assets/Scripts/Editor/AutoSetup.cs
 
-Important: the uploaded project still does **not** fully implement online multiplayer or true bone-rig animation assets. Those were listed in the proposal/PID, but the interim report says the current implementation switched to sprite-sheet animation and networking had not started yet.
+---
+
+## Iteration 1 — Gameplay bug fixes (kept)
+
+Scripts touched: `AnimationController.cs`, `PlayerController.cs`, `CombatSystem.cs`, `GameStateManager.cs`, `ArenaManager.cs`.
+
+- **Duplicate animator updates** — `AnimationController` was redundant with `PlayerController.UpdateAnimator`. Now an empty stub.
+- **Audio feedback wired in** — `AudioManager.Play___()` calls hooked into jump, land, swing, hit, death, round start.
+- **Death zone i-frame bug** — `ArenaManager.CheckPlayer` now uses `ForceDeath()` (bypasses i-frames). Threshold aligned with `PlayerController.deathY` at -8.5.
+- **ScreenFlash** — now fires on every hit, stronger flash on heavy.
+- **Attack cancel on hit** — `CombatSystem` subscribes to its own `HealthManager.OnHealthChanged`; mid-attack damage stops the routine and clears `isAttacking`.
+- **Friendly-fire i-frame respect** — `PerformHitCheck` skips invincible victims so the swing isn't consumed on a no-op.
+- **Hit-feedback scales with attack type** — heavy hits use longer hit-stop and stronger camera shake.
+
+These changes do not alter any scene or serialized field — the original MainMenu and GameplayScene from master continue to work exactly as before, with the added polish.
 
 ---
 
-## Gameplay bug fixes (this iteration)
+## Iteration 2 — Multiplayer foundation (added, NOT auto-wired into scenes)
 
-Pass focused on remaining gameplay bugs found while auditing the build.
+Adds the scaffolding for online multiplayer without touching the existing scenes. Nothing here changes how the current local-play scenes look or play.
 
-### Files changed
-- Assets/Scripts/AnimationController.cs
-- Assets/Scripts/PlayerController.cs
-- Assets/Scripts/CombatSystem.cs
-- Assets/Scripts/GameStateManager.cs
-- Assets/Scripts/ArenaManager.cs
+### Packages added
+`Packages/manifest.json` gained:
+- `com.unity.netcode.gameobjects` 2.1.1
+- `com.unity.transport` 2.5.1
 
-### What was fixed
+Unity will restore them on next open. If anything fails to compile after restore, open **Window / Package Manager**, search "Netcode for GameObjects", and click Install.
 
-**1. Duplicate animator updates** — `AnimationController.Update()` was writing the same animator parameters (`isMoving`, `isRunning`, `isGrounded`, `velocityY`) that `PlayerController.UpdateAnimator()` already writes during `FixedUpdate`. Both components are added to every player by `AutoSetup`, causing redundant per-frame work and a possible source of inconsistent state between physics and animation steps. `AnimationController` is now an empty stub so existing scene references stay valid; `PlayerController` is the single source of truth.
+### New runtime scripts (passive — only run if you wire them up)
+- `Assets/Scripts/Data/CharacterProfile.cs` — ScriptableObject for per-character stats (movement, combat, health, visuals).
+- `Assets/Scripts/Data/MatchSettings.cs` — ScriptableObject for match rules (rounds, timer, spawns, death zone).
+- `Assets/Scripts/Networking/ArenaNetworkManager.cs` — wraps Unity Netcode `NetworkManager` with `StartLocal`/`StartHost`/`StartClient`/`Shutdown`.
+- `Assets/Scripts/Networking/NetworkPlayer.cs` — `NetworkBehaviour` companion that propagates ownership and synced health.
+- `Assets/Scripts/Networking/LobbyMenu.cs` — UI controller for Local 1v1 / Host / Join.
 
-**2. Missing audio feedback** — `AudioManager` had clip slots and a full play API but was never called by gameplay code. Hooks added:
-- `PlayJump()` from `PlayerController.TryJump`
-- `PlayLand()` from `PlayerController.CheckGround` when the player transitions from airborne to grounded with downward impact velocity below `-6` (avoids a false "land" sound on round-start drop)
-- `PlayLightSwing` / `PlayHeavySwing` at the start of `CombatSystem.AttackRoutine`
-- `PlayLightHit` / `PlayHeavyHit` from `CombatSystem.PerformHitCheck` when a hit connects
-- `PlayDeath` from `PlayerController.OnDeath`
-- `PlayRoundStart` from `GameStateManager.DoRoundIntro` once the round transitions to `Fighting`
+### Modified gameplay scripts (additive only — old scenes still work)
+- `PlayerController`, `CombatSystem`, `HealthManager` gained an optional `profile` field. When null, all behavior matches master.
+- `GameStateManager` gained an optional `settings` field. When null, behavior matches master.
+- All four also gained `networkInputAuthority`/`networkSimulationAuthority` flags that default to `true` (so local play is unchanged).
 
-**3. Death zone blocked by i-frames** — `ArenaManager.CheckPlayer` killed fall-out players via `TakeDamage(9999, Vector2.zero)`, but `HealthManager.TakeDamage` returns early when the victim has invincibility frames. A player knocked off the stage immediately after being hit could survive their fall. Replaced with `HealthManager.ForceDeath()` which bypasses i-frames.
+### New editor tool (manual to run, leaves your scenes alone)
+- `Tools / Arena Combat / 5 - Build Adventurer Animator + Profile`
+  Imports the rvros adventurer Individual Sprites, builds `AC_Adventurer.controller` and `Assets/Data/Adventurer_Profile.asset` + `Knight_Profile.asset` + `DefaultMatchSettings.asset`. Does **not** touch any scene. Use this if you want the second character to look like the rvros adventurer instead of a recolored knight.
 
-**4. Two competing fall-out thresholds** — `PlayerController.deathY = -8.5` and `ArenaManager.deathZoneY = -12` were inconsistent, so the arena-level safety net never actually fired. `ArenaManager.deathZoneY` is now `-8.5` to match.
+### What was reverted
+The 2026-05-02 visual overhaul (richer painted background + decorative props on the gameplay scene + procedurally rebuilt MainMenu/Lobby scenes) was rolled back because the result didn't match the project's intended look. `Assets/Scenes/MainMenu.unity` and `Assets/Scenes/Gameplayscene.unity` are now back to the master version. `MenuSetup.cs` and the generated `LobbyMenu.unity` were deleted. `AutoSetup.cs` is back to its master version.
 
-**5. ScreenFlash never triggered** — the ScreenFlash component existed but no caller invoked it. `CombatSystem.PerformHitCheck` now triggers `ScreenFlash.Instance.Flash(isHeavy)` on connection, with a stronger flash on heavy hits.
+---
 
-**6. Attacks continued firing after the attacker was hit** — getting struck during attack startup left the active `AttackRoutine` running, so the swing's hitbox would still resolve. `CombatSystem` now subscribes to its own `HealthManager.OnHealthChanged`; on a damage event mid-attack, the routine is stopped, the active-attack handle is cleared, and `isAttacking` is reset.
+## Recommended FYP path (for the Mortal-Kombat + Brawlhalla goal)
 
-**7. Hit-feedback intensity now scales with attack type** — heavy hits use longer hit-stop (0.12s vs 0.08s) and a stronger camera shake (0.18s/0.36 amplitude vs 0.12s/0.25). Light hits remain crisp; heavy hits feel weighty.
+The current build already has the Mortal-Kombat-style fighting feel: two-player rounds, light/heavy attacks, knockback, hit-stop, screen flash, health bars with lag bars, win conditions, rematch flow. The Brawlhalla piece is the platform arena + fall-out blast zone, which is also in.
 
-**8. Friendly-fire i-frame respect** — `CombatSystem.PerformHitCheck` skips victims that are currently invincible instead of treating them as the first valid target and consuming the swing on a no-op. Lets the swing pass through and find a different target if any are present.
+What's left for a strong FYP submission:
 
-### What this does NOT touch
-Online multiplayer, networking sync, and bone-rig animation are still out of scope for this pass — the interim report continues to flag them as not-yet-started.
+1. **Don't regenerate the scenes via tooling.** Polish them directly in the Unity Editor. The scene files in master are the right baseline — if you want fancier backgrounds, drag sprites into the Background hierarchy in the scene by hand and tweak by eye.
+2. **Wire the multiplayer foundation into the gameplay scene.** This is the most important documented goal (FR-01, FR-09 from the Interim) and the foundation is now in place. The wire-up is small but needs to be done in the Unity Editor:
+   - Add a `NetworkManager` GameObject to GameplayScene with the Netcode `NetworkManager` component + `UnityTransport`.
+   - Add an empty `ArenaNetworkManager` GameObject too.
+   - On each Player GameObject in the scene, add `NetworkObject`, `NetworkTransform`, `NetworkAnimator`, and `NetworkPlayer`.
+   - Build a small lobby scene by hand (Canvas with three buttons: Local / Host / Join + IP/port inputs) and drop a `LobbyMenu` script on it that references the buttons.
+3. **Maps (Brawlhalla-style variety).** Duplicate the existing `Gameplayscene.unity` once or twice and re-arrange the platforms inside the Editor to make 2–3 stages. Hook the chosen stage into the lobby flow with `SceneManager.LoadScene`.
+4. **Iteration 1 bug fixes are already in place.** Audio, attack cancel, screen flash, death zone — those all work without any further wiring.
+
+If at any point a tool or script generates something that looks wrong, the safe move is `git checkout master -- <file>` to roll that one file back without losing the rest.

@@ -7,6 +7,9 @@ public class GameStateManager : MonoBehaviour
 {
     public static GameStateManager Instance { get; private set; }
 
+    [Header("Settings (optional — overrides inline values when assigned)")]
+    public MatchSettings settings;
+
     [Header("Match Settings")]
     public int roundsToWin = 2;
     public float matchTimeSec = 99f;
@@ -27,7 +30,11 @@ public class GameStateManager : MonoBehaviour
     public enum MatchState { Intro, Fighting, RoundEnd, MatchOver }
     public MatchState State { get; private set; } = MatchState.Intro;
 
+    [HideInInspector] public bool isNetworkAuthority = true;
+    [HideInInspector] public bool waitForRemotePlayer = false;
+
     private float _timeRemaining;
+    private bool _matchStarted;
     private int _p1Wins;
     private int _p2Wins;
     private int _currentRound = 1;
@@ -48,15 +55,74 @@ public class GameStateManager : MonoBehaviour
             return;
         }
         Instance = this;
+
+        ApplySettings();
+    }
+
+    private void ApplySettings()
+    {
+        if (settings == null) return;
+
+        roundsToWin = settings.roundsToWin;
+        matchTimeSec = settings.matchTimeSec;
+        roundIntroDelay = settings.roundIntroDelay;
+        fightTextDelay = settings.fightTextDelay;
+        roundEndDelay = settings.roundEndDelay;
     }
 
     private void Start()
     {
+        if (!isNetworkAuthority) return;
+
+        // If we're in a networked session (Host or Client), wait for the second player
+        // to fully connect before starting the match. MultiplayerSceneBinder will call
+        // BeginMatch() on the host once Player 2 ownership has transferred.
+        bool networked = ArenaNetworkManager.Instance != null &&
+                         ArenaNetworkManager.Instance.CurrentMode != ArenaNetworkManager.SessionMode.Local;
+
+        if (networked)
+        {
+            StartCoroutine(EnterWaitingState());
+            return;
+        }
+
+        BeginMatch();
+    }
+
+    private IEnumerator EnterWaitingState()
+    {
+        // Wait one frame so UIManager has a chance to subscribe to OnRoundIntroText
+        // (their Start methods can fire in any order otherwise).
+        yield return null;
+
+        ResetPlayers();
+        LockPlayers(true);
+
+        // Re-fire the message periodically so it persists past the announcement-text auto-fade.
+        while (!_matchStarted)
+        {
+            OnRoundIntroText?.Invoke("WAITING FOR OPPONENT...");
+            yield return new WaitForSeconds(1.4f);
+        }
+    }
+
+    /// <summary>
+    /// Called from MultiplayerSceneBinder once both players are connected and ownership
+    /// has been transferred. In local 2P play, Start() calls this immediately.
+    /// </summary>
+    public void BeginMatch()
+    {
+        if (!isNetworkAuthority) return;
+        if (_matchStarted) return;
+
+        _matchStarted = true;
+        OnRoundIntroText?.Invoke(string.Empty);
         StartCoroutine(DoRoundIntro());
     }
 
     private void Update()
     {
+        if (!isNetworkAuthority) return;
         if (State != MatchState.Fighting) return;
 
         _timeRemaining = Mathf.Max(0f, _timeRemaining - Time.deltaTime);
@@ -67,6 +133,29 @@ public class GameStateManager : MonoBehaviour
             _roundEndStarted = true;
             StartCoroutine(OnTimeUp());
         }
+    }
+
+    // Helpers used by NetworkGameSync to push server-driven state into local UI events on clients.
+    public void RaiseTimerUpdate(float t)
+    {
+        _timeRemaining = t;
+        OnTimerUpdate?.Invoke(t);
+    }
+
+    public void RaiseScoreUpdate(int p1, int p2)
+    {
+        _p1Wins = p1;
+        _p2Wins = p2;
+        OnScoreUpdate?.Invoke(p1, p2);
+    }
+
+    public void RaiseRoundIntroText(string msg) => OnRoundIntroText?.Invoke(msg);
+    public void RaiseMatchResult(string msg) => OnMatchResult?.Invoke(msg);
+
+    public void RaiseRoundStart()
+    {
+        State = MatchState.Fighting;
+        OnRoundStart?.Invoke();
     }
 
     private IEnumerator DoRoundIntro()
@@ -96,6 +185,7 @@ public class GameStateManager : MonoBehaviour
 
     public void OnPlayerDied(int deadPlayerIndex)
     {
+        if (!isNetworkAuthority) return;
         if (State != MatchState.Fighting || _roundEndStarted) return;
         _roundEndStarted = true;
         StartCoroutine(EndRound(deadPlayerIndex));
@@ -161,12 +251,33 @@ public class GameStateManager : MonoBehaviour
 
     public void RestartMatch()
     {
+        if (!isNetworkAuthority) return;
         StopAllCoroutines();
         _p1Wins = 0;
         _p2Wins = 0;
         _currentRound = 1;
         _roundEndStarted = false;
+        _matchStarted = true;
         StartCoroutine(DoRoundIntro());
+    }
+
+    /// <summary>
+    /// Stops the match immediately — the timer halts, the round loop is cancelled, and the
+    /// match-over panel shows with the supplied result string. Used when the opponent
+    /// disconnects mid-match.
+    /// </summary>
+    public void EndMatchByForfeit(string result)
+    {
+        if (!isNetworkAuthority) return;
+        if (State == MatchState.MatchOver) return;
+
+        StopAllCoroutines();
+        State = MatchState.MatchOver;
+        _roundEndStarted = true;
+
+        LockPlayers(true);
+        OnRoundIntroText?.Invoke(string.Empty);
+        OnMatchResult?.Invoke(result);
     }
 
     public void ReturnToMainMenu()

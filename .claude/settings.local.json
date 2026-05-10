@@ -6,7 +6,11 @@
       "Read(//tmp/**)",
       "Bash(pdftotext -layout \"D:/NSBM/FYP/10952382_PID.pdf\" \"/tmp/pid.txt\")",
       "Bash(pdftotext -layout \"D:/NSBM/FYP/10952382_Interim.pdf\" \"/tmp/interim.txt\")",
-      "Bash(cygpath -w /tmp/proposal.txt)"
+      "Bash(cygpath -w /tmp/proposal.txt)",
+      "Bash(python -c \"from PIL import Image; im=Image.open\\(r'C:/Unity/2D-Arena-Combat-Game/.claude/worktrees/intelligent-payne-19e19a/Assets/Art/rvros-adventurer/adventurer-v1.5-Sheet.png'\\); print\\(im.size\\)\")",
+      "Bash(python -c \"from PIL import Image; im=Image.open\\(r'C:/Unity/2D-Arena-Combat-Game/.claude/worktrees/intelligent-payne-19e19a/Assets/Art/rvros-adventurer/Individual Sprites/adventurer-air-attack-3-end-00.png'\\); print\\(im.size\\)\")",
+      "Bash(git checkout *)",
+      "Bash(grep -v \"\\\\.meta$\")"
     ]
   }
 }

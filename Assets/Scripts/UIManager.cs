@@ -102,9 +102,42 @@ public class UIManager : MonoBehaviour
         if (matchOverPanel != null) matchOverPanel.SetActive(false);
         if (announcementText != null) announcementText.text = string.Empty;
 
-        rematchButton?.onClick.AddListener(() => GameStateManager.Instance?.RestartMatch());
-        quitButton?.onClick.AddListener(Application.Quit);
-        menuButton?.onClick.AddListener(() => SceneManager.LoadScene("MainMenu"));
+        rematchButton?.onClick.AddListener(OnRematchClicked);
+        quitButton?.onClick.AddListener(OnQuitClicked);
+        menuButton?.onClick.AddListener(OnMenuClicked);
+    }
+
+    private void OnRematchClicked()
+    {
+        GameStateManager gsm = GameStateManager.Instance;
+        if (gsm == null) return;
+
+        // In networked play, route the rematch through the server.
+        // The host triggers RestartMatch directly; the client asks via ServerRpc.
+        if (gsm.isNetworkAuthority)
+        {
+            gsm.RestartMatch();
+        }
+        else if (NetworkGameSync.Instance != null)
+        {
+            NetworkGameSync.Instance.RequestRestartServerRpc();
+        }
+    }
+
+    private void OnMenuClicked()
+    {
+        if (ArenaNetworkManager.Instance != null)
+            ArenaNetworkManager.Instance.Shutdown();
+
+        SceneManager.LoadScene("MainMenu");
+    }
+
+    private void OnQuitClicked()
+    {
+        if (ArenaNetworkManager.Instance != null)
+            ArenaNetworkManager.Instance.Shutdown();
+
+        Application.Quit();
     }
 
     private void Start()

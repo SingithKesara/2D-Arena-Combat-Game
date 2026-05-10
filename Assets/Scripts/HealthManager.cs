@@ -4,11 +4,17 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody2D))]
 public class HealthManager : MonoBehaviour
 {
+    [Header("Profile (optional — overrides inline values when assigned)")]
+    public CharacterProfile profile;
+
     [Header("Stats")]
     public int maxHealth = 100;
 
     [Header("Invincibility After Hit")]
     public float iFrameDuration = 0.25f;
+
+    [Header("Networking (set by NetworkPlayer when networked)")]
+    [HideInInspector] public bool networkSimulationAuthority = true;
 
     public int CurrentHealth { get; private set; }
     public bool IsInvincible => _isInvincible;
@@ -25,7 +31,19 @@ public class HealthManager : MonoBehaviour
     {
         _rb = GetComponent<Rigidbody2D>();
         _pc = GetComponent<PlayerController>();
+
+        ApplyProfile();
+
         CurrentHealth = maxHealth;
+    }
+
+    private void ApplyProfile()
+    {
+        CharacterProfile p = profile != null ? profile : (_pc != null ? _pc.profile : null);
+        if (p == null) return;
+
+        maxHealth = p.maxHealth;
+        iFrameDuration = p.iFrameDuration;
     }
 
     private void Update()
@@ -39,6 +57,7 @@ public class HealthManager : MonoBehaviour
 
     public void TakeDamage(int amount, Vector2 knockback)
     {
+        if (!networkSimulationAuthority) return;
         if (_isInvincible || _pc == null || _pc.isDead) return;
 
         CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
@@ -61,6 +80,9 @@ public class HealthManager : MonoBehaviour
 
     public void ForceDeath()
     {
+        // Damage / death are server-authoritative in networked play. On a non-authority side
+        // (i.e. a client), the server's NetworkVariable will deliver the HP drop instead.
+        if (!networkSimulationAuthority) return;
         if (_pc != null && _pc.isDead) return;
 
         CurrentHealth = 0;

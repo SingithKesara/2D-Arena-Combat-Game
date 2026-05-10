@@ -6,6 +6,9 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Collider2D))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Profile (optional — overrides inline values when assigned)")]
+    public CharacterProfile profile;
+
     [Header("Movement")]
     public float walkSpeed = 8f;
     public float runSpeed = 13f;
@@ -33,6 +36,11 @@ public class PlayerController : MonoBehaviour
 
     [Header("Runtime State")]
     public bool controlsLocked;
+
+    [Header("Networking (set by NetworkPlayer when networked)")]
+    [HideInInspector] public bool networkInputAuthority = true;
+    [HideInInspector] public bool networkSimulationAuthority = true;
+    [HideInInspector] public bool networkUseP1KeyScheme = false;
 
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
@@ -72,6 +80,8 @@ public class PlayerController : MonoBehaviour
         _health = GetComponent<HealthManager>();
         _col = GetComponent<Collider2D>();
 
+        ApplyProfile();
+
         if (visualRoot == null)
         {
             Transform found = transform.Find("Visual");
@@ -94,8 +104,19 @@ public class PlayerController : MonoBehaviour
     {
         if (isDead) return;
 
-        ReadInput();
-        CheckFallDeath();
+        if (networkInputAuthority)
+            ReadInput();
+
+        // Fall-out detection is server-authoritative in networked mode (and always-on locally).
+        // The server's transform reflects the synced position from NetworkTransform Owner mode,
+        // so it sees Player 2 fall too.
+        bool isLocalSession = ArenaNetworkManager.Instance == null ||
+                              ArenaNetworkManager.Instance.CurrentMode == ArenaNetworkManager.SessionMode.Local;
+        bool isServer = Unity.Netcode.NetworkManager.Singleton != null &&
+                        Unity.Netcode.NetworkManager.Singleton.IsServer;
+
+        if (isLocalSession || isServer)
+            CheckFallDeath();
     }
 
     private void FixedUpdate()
@@ -106,9 +127,18 @@ public class PlayerController : MonoBehaviour
             _groundLockTimer -= Time.fixedDeltaTime;
 
         CheckGround();
-        ApplyMovement();
-        ClampFall();
-        UpdateAnimator();
+
+        // Only the owner / authority simulates physics-driven movement.
+        // Non-owners receive position from NetworkTransform and animation from NetworkAnimator,
+        // so writing local velocity / animator parameters here would clobber the synced state.
+        if (networkSimulationAuthority)
+        {
+            ApplyMovement();
+            ClampFall();
+        }
+
+        if (networkInputAuthority)
+            UpdateAnimator();
     }
 
     private void ReadInput()
@@ -125,7 +155,11 @@ public class PlayerController : MonoBehaviour
         float x = 0f;
         float y = 0f;
 
-        if (playerIndex == 1)
+        // In networked mode the local owner always uses WASD (their own keyboard).
+        // In local 2P play, keep the split-keyboard scheme: P1 = WASD, P2 = Numpad.
+        bool useP1Scheme = networkUseP1KeyScheme || playerIndex == 1;
+
+        if (useP1Scheme)
         {
             if (kb.aKey.isPressed) x -= 1f;
             if (kb.dKey.isPressed) x += 1f;
@@ -249,6 +283,13 @@ public class PlayerController : MonoBehaviour
 
                 if (impactVy < -6f && AudioManager.Instance != null)
                     AudioManager.Instance.PlayLand();
+
+                // A double-jump in mid-air queues the "jump" trigger because the Fall state
+                // has no transition to Jump. On landing, that queued trigger would otherwise
+                // bounce the character back into the Jump animation and leave the legs in
+                // a stuck running pose. Clear it.
+                if (_anim != null)
+                    _anim.ResetTrigger(H_Jump);
             }
         }
     }
@@ -362,6 +403,21 @@ public class PlayerController : MonoBehaviour
         Vector3 local = visualRoot.localPosition;
         local.y = visualYOffset;
         visualRoot.localPosition = local;
+    }
+
+    private void ApplyProfile()
+    {
+        if (profile == null) return;
+
+        walkSpeed = profile.walkSpeed;
+        runSpeed = profile.runSpeed;
+        jumpForce = profile.jumpForce;
+        fastFallForce = profile.fastFallForce;
+        maxFallSpeed = profile.maxFallSpeed;
+        visualYOffset = profile.visualYOffset;
+
+        if (profile.animatorController != null && _anim != null)
+            _anim.runtimeAnimatorController = profile.animatorController;
     }
 
     public void FaceTarget(Transform target)
