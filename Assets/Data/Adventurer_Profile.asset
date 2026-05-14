@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31795292796588a42a0d56777a5bd870, type: 3}
+  m_Name: Adventurer_Profile
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProfile
+  displayName: Adventurer
+  portrait: {fileID: 0}
+  walkSpeed: 8
+  runSpeed: 13
+  jumpForce: 16
+  fastFallForce: 22
+  maxFallSpeed: -28
+  lightDamage: 7
+  heavyDamage: 18
+  lightAttackRadius: 0.7
+  heavyAttackRadius: 1
+  lightKnockback: 6.5
+  heavyKnockback: 15
+  upwardBias: 0.42
+  lightStartup: 0.07
+  lightCooldown: 0.2
+  heavyStartup: 0.18
+  heavyCooldown: 0.42
+  maxHealth: 105
+  iFrameDuration: 0.25
+  animatorController: {fileID: 9100000, guid: 3043f8aa08056624ca6930d64cb00117, type: 2}
+  colliderSize: {x: 0.5, y: 0.95}
+  colliderOffset: {x: 0, y: -0.02}
+  visualYOffset: -0.45
+  attackPointOffset: {x: 0.7, y: 0.1}
+  visualScale: {x: 2.4, y: 2.4, z: 1}

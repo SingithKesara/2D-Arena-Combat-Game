@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31795292796588a42a0d56777a5bd870, type: 3}
+  m_Name: Profile_Knight_Blue
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProfile
+  displayName: Sir Azure
+  portrait: {fileID: 2119006249, guid: 9720f9572a6a28c4c93c8dcd18f626d5, type: 3}
+  walkSpeed: 8
+  runSpeed: 13
+  jumpForce: 16
+  fastFallForce: 22
+  maxFallSpeed: -28
+  lightDamage: 8
+  heavyDamage: 20
+  lightAttackRadius: 0.65
+  heavyAttackRadius: 1.05
+  lightKnockback: 7
+  heavyKnockback: 16
+  upwardBias: 0.4
+  lightStartup: 0.08
+  lightCooldown: 0.22
+  heavyStartup: 0.16
+  heavyCooldown: 0.38
+  maxHealth: 100
+  iFrameDuration: 0.25
+  animatorController: {fileID: 9100000, guid: 388979b5baf322b418b7c68a33503b70, type: 2}
+  colliderSize: {x: 0.5, y: 0.95}
+  colliderOffset: {x: 0, y: -0.02}
+  visualYOffset: -0.55
+  attackPointOffset: {x: 0.75, y: 0.1}
+  visualScale: {x: 2, y: 2, z: 1}

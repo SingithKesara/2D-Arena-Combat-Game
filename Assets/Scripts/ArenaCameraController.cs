@@ -15,10 +15,10 @@ public class ArenaCameraController : MonoBehaviour
 
     [Header("Zoom")]
     public float zoomSmooth = 5f;
-    public float minOrthographicSize = 4.7f;
-    public float maxOrthographicSize = 6.8f;
-    public float horizontalPadding = 2.0f;
-    public float verticalPadding = 1.6f;
+    public float minOrthographicSize = 5.4f;
+    public float maxOrthographicSize = 7.4f;
+    public float horizontalPadding = 2.4f;
+    public float verticalPadding = 1.8f;
 
     [Header("Arena Camera Limits")]
     public bool useCameraLimits = true;
@@ -37,6 +37,7 @@ public class ArenaCameraController : MonoBehaviour
 
     private Camera _cam;
     private Vector3 _lastGoodTarget;
+    private Vector3 _basePosition;
     private bool _hasSnapped;
 
     private readonly List<Vector3> _trackedPositions = new List<Vector3>();
@@ -107,7 +108,7 @@ public class ArenaCameraController : MonoBehaviour
 
         Vector3 targetPosition = bounds.center;
         targetPosition.y += verticalOffset;
-        targetPosition.z = transform.position.z;
+        targetPosition.z = -10f;
 
         if (useCameraLimits)
         {
@@ -154,16 +155,23 @@ public class ArenaCameraController : MonoBehaviour
     {
         if (forceSnap)
         {
-            transform.position = targetPosition;
+            _basePosition = targetPosition;
             _cam.orthographicSize = targetSize;
-            return;
+        }
+        else
+        {
+            float followT = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
+            float zoomT = 1f - Mathf.Exp(-zoomSmooth * Time.deltaTime);
+
+            _basePosition = Vector3.Lerp(_basePosition, targetPosition, followT);
+            _cam.orthographicSize = Mathf.Lerp(_cam.orthographicSize, targetSize, zoomT);
         }
 
-        float followT = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
-        float zoomT = 1f - Mathf.Exp(-zoomSmooth * Time.deltaTime);
+        Vector3 shakeOffset = CameraShake.Instance != null
+            ? CameraShake.Instance.CurrentOffset
+            : Vector3.zero;
 
-        transform.position = Vector3.Lerp(transform.position, targetPosition, followT);
-        _cam.orthographicSize = Mathf.Lerp(_cam.orthographicSize, targetSize, zoomT);
+        transform.position = _basePosition + shakeOffset;
     }
 
     private void OnDrawGizmosSelected()

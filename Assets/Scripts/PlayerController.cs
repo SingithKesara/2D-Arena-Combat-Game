@@ -6,6 +6,9 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Collider2D))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Profile (optional — overrides inline values when assigned)")]
+    public CharacterProfile profile;
+
     [Header("Movement")]
     public float walkSpeed = 8f;
     public float runSpeed = 13f;
@@ -34,9 +37,15 @@ public class PlayerController : MonoBehaviour
     [Header("Runtime State")]
     public bool controlsLocked;
 
+    [Header("Networking (set by NetworkPlayer when networked)")]
+    [HideInInspector] public bool networkInputAuthority = true;
+    [HideInInspector] public bool networkSimulationAuthority = true;
+    [HideInInspector] public bool networkUseP1KeyScheme = false;
+
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
     [HideInInspector] public bool isDead;
+    [HideInInspector] public bool isBlocking;
 
     public float MoveX => _move.x;
 
@@ -53,6 +62,10 @@ public class PlayerController : MonoBehaviour
     private CombatSystem _combat;
     private HealthManager _health;
     private Collider2D _col;
+    private SpriteRenderer _visualRenderer;
+    private bool _lastVisualBlocking;
+
+    private static readonly Color BlockTint = new Color(0.55f, 0.78f, 1f, 1f);
 
     private readonly RaycastHit2D[] _groundHits = new RaycastHit2D[8];
 
@@ -72,11 +85,16 @@ public class PlayerController : MonoBehaviour
         _health = GetComponent<HealthManager>();
         _col = GetComponent<Collider2D>();
 
+        ApplyProfile();
+
         if (visualRoot == null)
         {
             Transform found = transform.Find("Visual");
             if (found != null) visualRoot = found;
         }
+
+        if (visualRoot != null)
+            _visualRenderer = visualRoot.GetComponent<SpriteRenderer>();
 
         ApplyVisualOffset();
 
@@ -90,12 +108,40 @@ public class PlayerController : MonoBehaviour
         ApplyFacing();
     }
 
+    private void LateUpdate()
+    {
+        // Keep the block tint in sync whenever isBlocking changes (owner via input or
+        // non-owner via NetworkVariable).
+        if (isBlocking != _lastVisualBlocking)
+        {
+            _lastVisualBlocking = isBlocking;
+            ApplyBlockingVisual();
+        }
+    }
+
+    private void ApplyBlockingVisual()
+    {
+        if (_visualRenderer == null) return;
+        _visualRenderer.color = isBlocking ? BlockTint : Color.white;
+    }
+
     private void Update()
     {
         if (isDead) return;
 
-        ReadInput();
-        CheckFallDeath();
+        if (networkInputAuthority)
+            ReadInput();
+
+        // Fall-out detection is server-authoritative in networked mode (and always-on locally).
+        // The server's transform reflects the synced position from NetworkTransform Owner mode,
+        // so it sees Player 2 fall too.
+        bool isLocalSession = ArenaNetworkManager.Instance == null ||
+                              ArenaNetworkManager.Instance.CurrentMode == ArenaNetworkManager.SessionMode.Local;
+        bool isServer = Unity.Netcode.NetworkManager.Singleton != null &&
+                        Unity.Netcode.NetworkManager.Singleton.IsServer;
+
+        if (isLocalSession || isServer)
+            CheckFallDeath();
     }
 
     private void FixedUpdate()
@@ -106,9 +152,18 @@ public class PlayerController : MonoBehaviour
             _groundLockTimer -= Time.fixedDeltaTime;
 
         CheckGround();
-        ApplyMovement();
-        ClampFall();
-        UpdateAnimator();
+
+        // Only the owner / authority simulates physics-driven movement.
+        // Non-owners receive position from NetworkTransform and animation from NetworkAnimator,
+        // so writing local velocity / animator parameters here would clobber the synced state.
+        if (networkSimulationAuthority)
+        {
+            ApplyMovement();
+            ClampFall();
+        }
+
+        if (networkInputAuthority)
+            UpdateAnimator();
     }
 
     private void ReadInput()
@@ -125,7 +180,20 @@ public class PlayerController : MonoBehaviour
         float x = 0f;
         float y = 0f;
 
-        if (playerIndex == 1)
+        // In networked mode the local owner always uses WASD (their own keyboard).
+        // In local 2P play, keep the split-keyboard scheme: P1 = WASD, P2 = Numpad.
+        bool useP1Scheme = networkUseP1KeyScheme || playerIndex == 1;
+
+        // Block (hold key). Only allowed when grounded and not mid-attack.
+        bool blockHeld;
+        if (useP1Scheme)
+            blockHeld = kb.lKey.isPressed;
+        else
+            blockHeld = kb.numpadPeriodKey.isPressed;
+
+        isBlocking = blockHeld && isGrounded && !isAttacking && !isDead;
+
+        if (useP1Scheme)
         {
             if (kb.aKey.isPressed) x -= 1f;
             if (kb.dKey.isPressed) x += 1f;
@@ -155,6 +223,9 @@ public class PlayerController : MonoBehaviour
             if (kb.numpadEnterKey.wasPressedThisFrame)
                 TryHeavyAttack();
         }
+
+        // While blocking, freeze horizontal input so the character stands their ground.
+        if (isBlocking) x = 0f;
 
         _move = new Vector2(x, y);
 
@@ -240,14 +311,29 @@ public class PlayerController : MonoBehaviour
         {
             _jumpsLeft = MAX_JUMPS;
 
-            if (!wasGrounded && _rb.linearVelocity.y < 0f)
-                _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
+            if (!wasGrounded)
+            {
+                float impactVy = _rb.linearVelocity.y;
+
+                if (impactVy < 0f)
+                    _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, 0f);
+
+                if (impactVy < -6f && AudioManager.Instance != null)
+                    AudioManager.Instance.PlayLand();
+
+                // A double-jump in mid-air queues the "jump" trigger because the Fall state
+                // has no transition to Jump. On landing, that queued trigger would otherwise
+                // bounce the character back into the Jump animation and leave the legs in
+                // a stuck running pose. Clear it.
+                if (_anim != null)
+                    _anim.ResetTrigger(H_Jump);
+            }
         }
     }
 
     private void ApplyMovement()
     {
-        if (controlsLocked || isAttacking)
+        if (controlsLocked || isAttacking || isBlocking)
         {
             _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
             return;
@@ -266,6 +352,7 @@ public class PlayerController : MonoBehaviour
     private void TryJump()
     {
         if (controlsLocked || isAttacking || isDead) return;
+        if (isBlocking) return; // can't jump while shielded
 
         if (isGrounded)
             _jumpsLeft = MAX_JUMPS;
@@ -278,17 +365,20 @@ public class PlayerController : MonoBehaviour
 
         _rb.linearVelocity = new Vector2(_rb.linearVelocity.x, jumpForce);
         _anim.SetTrigger(H_Jump);
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayJump();
     }
 
     private void TryLightAttack()
     {
-        if (controlsLocked || isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || isBlocking || _combat == null) return;
         _combat.DoLightAttack();
     }
 
     private void TryHeavyAttack()
     {
-        if (controlsLocked || isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || isBlocking || _combat == null) return;
         _combat.DoHeavyAttack();
     }
 
@@ -307,6 +397,14 @@ public class PlayerController : MonoBehaviour
         if (!dieWhenFallingOut) return;
         if (_fellOutThisLife) return;
         if (transform.position.y > deathY) return;
+
+        // Only count fall-out kills while the round is actually live. During Intro / RoundEnd /
+        // MatchOver the players might briefly be off-stage during respawn or freeze frames,
+        // and the death event would be discarded by GameStateManager anyway (causing the round
+        // to get stuck "won but never ended").
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.State != GameStateManager.MatchState.Fighting)
+            return;
 
         _fellOutThisLife = true;
 
@@ -353,6 +451,21 @@ public class PlayerController : MonoBehaviour
         visualRoot.localPosition = local;
     }
 
+    private void ApplyProfile()
+    {
+        if (profile == null) return;
+
+        walkSpeed = profile.walkSpeed;
+        runSpeed = profile.runSpeed;
+        jumpForce = profile.jumpForce;
+        fastFallForce = profile.fastFallForce;
+        maxFallSpeed = profile.maxFallSpeed;
+        visualYOffset = profile.visualYOffset;
+
+        if (profile.animatorController != null && _anim != null)
+            _anim.runtimeAnimatorController = profile.animatorController;
+    }
+
     public void FaceTarget(Transform target)
     {
         if (target == null) return;
@@ -372,18 +485,23 @@ public class PlayerController : MonoBehaviour
         isDead = true;
         controlsLocked = true;
         isAttacking = false;
+        isBlocking = false;
 
         _rb.linearVelocity = Vector2.zero;
         _rb.bodyType = RigidbodyType2D.Kinematic;
 
         if (_anim != null)
             _anim.SetTrigger(H_Death);
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayDeath();
     }
 
     public void ResetForNewRound(Vector3 spawnPos)
     {
         isDead = false;
         isAttacking = false;
+        isBlocking = false;
         controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;
@@ -408,6 +526,7 @@ public class PlayerController : MonoBehaviour
     {
         isDead = false;
         isAttacking = false;
+        isBlocking = false;
         controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;
