@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31795292796588a42a0d56777a5bd870, type: 3}
+  m_Name: Profile_Mushroom
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProfile
+  displayName: Sporeling
+  portrait: {fileID: 575749278, guid: 96fe7f2d6173c2f4ca5ad5e508efd42e, type: 3}
+  walkSpeed: 8
+  runSpeed: 12
+  jumpForce: 15
+  fastFallForce: 22
+  maxFallSpeed: -28
+  lightDamage: 9
+  heavyDamage: 21
+  lightAttackRadius: 0.65
+  heavyAttackRadius: 1.05
+  lightKnockback: 7
+  heavyKnockback: 16
+  upwardBias: 0.4
+  lightStartup: 0.08
+  lightCooldown: 0.22
+  heavyStartup: 0.16
+  heavyCooldown: 0.38
+  maxHealth: 95
+  iFrameDuration: 0.25
+  animatorController: {fileID: 9100000, guid: 6b353ed9edb7ca64c8af70a86995c636, type: 2}
+  colliderSize: {x: 0.5, y: 0.85}
+  colliderOffset: {x: 0, y: -0.02}
+  visualYOffset: -0.4
+  attackPointOffset: {x: 0.7, y: 0.1}
+  visualScale: {x: 1.6, y: 1.6, z: 1}

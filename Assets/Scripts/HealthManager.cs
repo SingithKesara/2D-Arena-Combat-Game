@@ -13,6 +13,12 @@ public class HealthManager : MonoBehaviour
     [Header("Invincibility After Hit")]
     public float iFrameDuration = 0.25f;
 
+    [Header("Block Mitigation")]
+    [Tooltip("Damage multiplier applied when the victim is blocking (0.25 = 75% damage reduction).")]
+    [Range(0f, 1f)] public float blockDamageMultiplier = 0.25f;
+    [Tooltip("Knockback magnitude multiplier applied when the victim is blocking.")]
+    [Range(0f, 1f)] public float blockKnockbackMultiplier = 0.5f;
+
     [Header("Networking (set by NetworkPlayer when networked)")]
     [HideInInspector] public bool networkSimulationAuthority = true;
 
@@ -60,13 +66,24 @@ public class HealthManager : MonoBehaviour
         if (!networkSimulationAuthority) return;
         if (_isInvincible || _pc == null || _pc.isDead) return;
 
-        CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
+        // Blocking: reduce damage and knockback. The victim's isBlocking flag is synced
+        // across the network by NetworkPlayer's _netBlocking NetworkVariable so the
+        // server side sees the correct value at damage-application time.
+        bool wasBlocked = _pc.isBlocking;
+        int appliedDamage = wasBlocked
+            ? Mathf.Max(0, Mathf.RoundToInt(amount * blockDamageMultiplier))
+            : amount;
+        Vector2 appliedKnockback = wasBlocked
+            ? knockback * blockKnockbackMultiplier
+            : knockback;
+
+        CurrentHealth = Mathf.Max(0, CurrentHealth - appliedDamage);
         OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
 
         if (_rb != null)
         {
             _rb.linearVelocity = Vector2.zero;
-            _rb.AddForce(knockback, ForceMode2D.Impulse);
+            _rb.AddForce(appliedKnockback, ForceMode2D.Impulse);
         }
 
         _pc.OnHitReceived();
@@ -110,5 +127,21 @@ public class HealthManager : MonoBehaviour
         _iFrameTimer = 0f;
 
         OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+    }
+
+    /// <summary>
+    /// Used by NetworkPlayer on the client side to mirror the server's HP value.
+    /// Updates CurrentHealth and fires OnHealthChanged so the UI redraws, without going
+    /// through the full TakeDamage / Die pipeline (which is server-authoritative).
+    /// </summary>
+    public void ApplyNetworkedHealth(int current)
+    {
+        CurrentHealth = Mathf.Clamp(current, 0, maxHealth);
+        OnHealthChanged?.Invoke(CurrentHealth, maxHealth);
+
+        // Mirror the death visual on the client too when HP hits zero (the actual game-end
+        // decision is still made on the server).
+        if (CurrentHealth <= 0 && _pc != null && !_pc.isDead)
+            _pc.OnDeath();
     }
 }

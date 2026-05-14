@@ -26,6 +26,20 @@ public class NetworkPlayer : NetworkBehaviour
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server);
 
+    // Owner-written so the controlling client can broadcast block state to all observers
+    // (server + other clients) without a round-trip to the server.
+    private readonly NetworkVariable<bool> _netBlocking = new(
+        false,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
+    private bool _lastSyncedBlocking;
+
+    // Caps applied to client-supplied damage requests as a basic anti-cheat measure.
+    private const int MAX_TRUSTED_DAMAGE = 40;
+    private const float MAX_TRUSTED_KNOCKBACK = 30f;
+    private const float MAX_TRUSTED_HIT_DISTANCE = 3.5f;
+
     private void Awake()
     {
         _pc = GetComponent<PlayerController>();
@@ -48,6 +62,18 @@ public class NetworkPlayer : NetworkBehaviour
             if (_health != null)
                 _health.OnHealthChanged += OnServerHealthChanged;
         }
+        else
+        {
+            // Client side: react to server-driven HP changes so the UI updates.
+            _netHealth.OnValueChanged += OnClientNetHealthChanged;
+            if (_health != null)
+                _health.ApplyNetworkedHealth(_netHealth.Value);
+        }
+
+        // Everyone listens to the block flag so the visual + damage-mitigation reflect
+        // the controlling client's input on both screens (and on the server itself).
+        _netBlocking.OnValueChanged += OnBlockingChanged;
+        if (_pc != null) _pc.isBlocking = _netBlocking.Value;
 
         ApplyNetworkedIdentity(_netPlayerIndex.Value);
         _netPlayerIndex.OnValueChanged += (_, newIdx) => ApplyNetworkedIdentity(newIdx);
@@ -59,12 +85,41 @@ public class NetworkPlayer : NetworkBehaviour
     {
         if (IsServer && _health != null)
             _health.OnHealthChanged -= OnServerHealthChanged;
+        else
+            _netHealth.OnValueChanged -= OnClientNetHealthChanged;
+
+        _netBlocking.OnValueChanged -= OnBlockingChanged;
+    }
+
+    private void Update()
+    {
+        if (!IsSpawned) return;
+        if (!IsOwner) return;
+        if (_pc == null) return;
+
+        if (_pc.isBlocking != _lastSyncedBlocking)
+        {
+            _netBlocking.Value = _pc.isBlocking;
+            _lastSyncedBlocking = _pc.isBlocking;
+        }
+    }
+
+    private void OnBlockingChanged(bool previous, bool current)
+    {
+        if (IsOwner) return;
+        if (_pc != null) _pc.isBlocking = current;
     }
 
     public override void OnGainedOwnership() => ConfigureOwnership();
     public override void OnLostOwnership() => ConfigureOwnership();
 
     private void OnServerHealthChanged(int current, int max) => _netHealth.Value = current;
+
+    private void OnClientNetHealthChanged(int previous, int current)
+    {
+        if (_health != null)
+            _health.ApplyNetworkedHealth(current);
+    }
 
     private void ApplyNetworkedIdentity(int idx)
     {
@@ -82,57 +137,72 @@ public class NetworkPlayer : NetworkBehaviour
         bool hasInputAuthority;
         if (localPlay)
         {
-            // Local 2P (split keyboard): both players controllable from this machine.
             hasInputAuthority = true;
         }
         else
         {
-            // Networked: input authority based on role + slot.
-            //   - Host always controls Player 1 (defaultPlayerIndex == 1)
-            //   - Joining client always controls Player 2 (defaultPlayerIndex == 2)
-            // This is independent of NGO ownership, so the host doesn't accidentally drive
-            // Player 2 just because the server still owns the NetworkObject before the client connects.
+            // Networked: input authority is role-based.
+            //   Host always controls Player 1; joining client always controls Player 2.
             bool isHost = NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
             bool isClient = NetworkManager.Singleton != null && NetworkManager.Singleton.IsClient && !isHost;
 
-            if (isHost)
-                hasInputAuthority = (defaultPlayerIndex == 1);
-            else if (isClient)
-                hasInputAuthority = (defaultPlayerIndex == 2);
-            else
-                hasInputAuthority = false;
+            if (isHost) hasInputAuthority = (defaultPlayerIndex == 1);
+            else if (isClient) hasInputAuthority = (defaultPlayerIndex == 2);
+            else hasInputAuthority = false;
         }
 
         _pc.networkInputAuthority = hasInputAuthority;
         _pc.networkUseP1KeyScheme = !localPlay && hasInputAuthority;
 
-        // Simulation authority for the player physics:
-        //   - Local: both controlled here.
-        //   - Networked: whoever has input authority also runs the physics for that character.
-        // NetworkTransform set to Owner mode replicates the position from the controlling side.
         bool simAuth = localPlay || hasInputAuthority;
         _pc.networkSimulationAuthority = simAuth;
         if (_combat != null) _combat.networkSimulationAuthority = simAuth;
 
-        // Damage application stays server-authoritative regardless of who detected the hit.
+        // Damage application stays server-authoritative.
         if (_health != null)
             _health.networkSimulationAuthority = localPlay ||
                 (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer);
     }
 
     /// <summary>
-    /// Called by CombatSystem on the attacking client when a hit lands.
-    /// Server applies the damage authoritatively so HP stays in sync.
+    /// Called by the server when a round starts. Tells the OWNER of this NetworkObject
+    /// (which may be the client for Player 2) to reset their authoritative transform and
+    /// gameplay state. Required because NetworkTransform is in Owner mode.
+    /// </summary>
+    [ClientRpc]
+    public void ResetForNewRoundClientRpc(Vector3 spawnPosition)
+    {
+        if (!IsOwner) return;
+
+        if (_pc != null)
+            _pc.ResetForNewRound(spawnPosition);
+
+        if (_health != null)
+            _health.ResetHealth();
+    }
+
+    /// <summary>
+    /// Called by a client when their CombatSystem detects a hit. Server validates and
+    /// applies the damage authoritatively.
     /// </summary>
     [ServerRpc(RequireOwnership = false)]
-    public void RequestDamageServerRpc(ulong victimNetworkObjectId, int damage, Vector2 knockback)
+    public void RequestDamageServerRpc(
+        ulong victimNetworkObjectId,
+        int damage,
+        Vector2 knockback,
+        ServerRpcParams rpcParams = default)
     {
         if (NetworkManager.Singleton == null) return;
 
-        // Server gate: ignore client-requested damage outside the active fighting window.
         GameStateManager gsm = GameStateManager.Instance;
         if (gsm != null && gsm.isNetworkAuthority &&
             gsm.State != GameStateManager.MatchState.Fighting)
+            return;
+
+        // Sender must own the NetworkPlayer that the RPC was sent from (no spoofing).
+        ulong senderId = rpcParams.Receive.SenderClientId;
+        bool senderIsHost = senderId == NetworkManager.ServerClientId && IsOwner;
+        if (!senderIsHost && OwnerClientId != senderId)
             return;
 
         if (!NetworkManager.Singleton.SpawnManager.SpawnedObjects.TryGetValue(
@@ -141,7 +211,14 @@ public class NetworkPlayer : NetworkBehaviour
 
         HealthManager victim = victimNO.GetComponent<HealthManager>();
         if (victim == null) return;
+        if (victimNO == NetworkObject) return; // can't damage self
 
-        victim.TakeDamage(damage, knockback);
+        int clampedDamage = Mathf.Clamp(damage, 0, MAX_TRUSTED_DAMAGE);
+        Vector2 clampedKnockback = Vector2.ClampMagnitude(knockback, MAX_TRUSTED_KNOCKBACK);
+
+        float distance = Vector2.Distance(transform.position, victimNO.transform.position);
+        if (distance > MAX_TRUSTED_HIT_DISTANCE) return;
+
+        victim.TakeDamage(clampedDamage, clampedKnockback);
     }
 }

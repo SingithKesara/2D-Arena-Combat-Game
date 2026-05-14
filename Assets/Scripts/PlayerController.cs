@@ -45,6 +45,7 @@ public class PlayerController : MonoBehaviour
     [HideInInspector] public bool isGrounded;
     [HideInInspector] public bool isAttacking;
     [HideInInspector] public bool isDead;
+    [HideInInspector] public bool isBlocking;
 
     public float MoveX => _move.x;
 
@@ -61,6 +62,10 @@ public class PlayerController : MonoBehaviour
     private CombatSystem _combat;
     private HealthManager _health;
     private Collider2D _col;
+    private SpriteRenderer _visualRenderer;
+    private bool _lastVisualBlocking;
+
+    private static readonly Color BlockTint = new Color(0.55f, 0.78f, 1f, 1f);
 
     private readonly RaycastHit2D[] _groundHits = new RaycastHit2D[8];
 
@@ -88,6 +93,9 @@ public class PlayerController : MonoBehaviour
             if (found != null) visualRoot = found;
         }
 
+        if (visualRoot != null)
+            _visualRenderer = visualRoot.GetComponent<SpriteRenderer>();
+
         ApplyVisualOffset();
 
         _rb.bodyType = RigidbodyType2D.Dynamic;
@@ -98,6 +106,23 @@ public class PlayerController : MonoBehaviour
         _jumpsLeft = MAX_JUMPS;
         _facingRight = playerIndex == 1;
         ApplyFacing();
+    }
+
+    private void LateUpdate()
+    {
+        // Keep the block tint in sync whenever isBlocking changes (owner via input or
+        // non-owner via NetworkVariable).
+        if (isBlocking != _lastVisualBlocking)
+        {
+            _lastVisualBlocking = isBlocking;
+            ApplyBlockingVisual();
+        }
+    }
+
+    private void ApplyBlockingVisual()
+    {
+        if (_visualRenderer == null) return;
+        _visualRenderer.color = isBlocking ? BlockTint : Color.white;
     }
 
     private void Update()
@@ -159,6 +184,15 @@ public class PlayerController : MonoBehaviour
         // In local 2P play, keep the split-keyboard scheme: P1 = WASD, P2 = Numpad.
         bool useP1Scheme = networkUseP1KeyScheme || playerIndex == 1;
 
+        // Block (hold key). Only allowed when grounded and not mid-attack.
+        bool blockHeld;
+        if (useP1Scheme)
+            blockHeld = kb.lKey.isPressed;
+        else
+            blockHeld = kb.numpadPeriodKey.isPressed;
+
+        isBlocking = blockHeld && isGrounded && !isAttacking && !isDead;
+
         if (useP1Scheme)
         {
             if (kb.aKey.isPressed) x -= 1f;
@@ -189,6 +223,9 @@ public class PlayerController : MonoBehaviour
             if (kb.numpadEnterKey.wasPressedThisFrame)
                 TryHeavyAttack();
         }
+
+        // While blocking, freeze horizontal input so the character stands their ground.
+        if (isBlocking) x = 0f;
 
         _move = new Vector2(x, y);
 
@@ -296,7 +333,7 @@ public class PlayerController : MonoBehaviour
 
     private void ApplyMovement()
     {
-        if (controlsLocked || isAttacking)
+        if (controlsLocked || isAttacking || isBlocking)
         {
             _rb.linearVelocity = new Vector2(0f, _rb.linearVelocity.y);
             return;
@@ -315,6 +352,7 @@ public class PlayerController : MonoBehaviour
     private void TryJump()
     {
         if (controlsLocked || isAttacking || isDead) return;
+        if (isBlocking) return; // can't jump while shielded
 
         if (isGrounded)
             _jumpsLeft = MAX_JUMPS;
@@ -334,13 +372,13 @@ public class PlayerController : MonoBehaviour
 
     private void TryLightAttack()
     {
-        if (controlsLocked || isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || isBlocking || _combat == null) return;
         _combat.DoLightAttack();
     }
 
     private void TryHeavyAttack()
     {
-        if (controlsLocked || isAttacking || isDead || _combat == null) return;
+        if (controlsLocked || isAttacking || isDead || isBlocking || _combat == null) return;
         _combat.DoHeavyAttack();
     }
 
@@ -359,6 +397,14 @@ public class PlayerController : MonoBehaviour
         if (!dieWhenFallingOut) return;
         if (_fellOutThisLife) return;
         if (transform.position.y > deathY) return;
+
+        // Only count fall-out kills while the round is actually live. During Intro / RoundEnd /
+        // MatchOver the players might briefly be off-stage during respawn or freeze frames,
+        // and the death event would be discarded by GameStateManager anyway (causing the round
+        // to get stuck "won but never ended").
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.State != GameStateManager.MatchState.Fighting)
+            return;
 
         _fellOutThisLife = true;
 
@@ -439,6 +485,7 @@ public class PlayerController : MonoBehaviour
         isDead = true;
         controlsLocked = true;
         isAttacking = false;
+        isBlocking = false;
 
         _rb.linearVelocity = Vector2.zero;
         _rb.bodyType = RigidbodyType2D.Kinematic;
@@ -454,6 +501,7 @@ public class PlayerController : MonoBehaviour
     {
         isDead = false;
         isAttacking = false;
+        isBlocking = false;
         controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;
@@ -478,6 +526,7 @@ public class PlayerController : MonoBehaviour
     {
         isDead = false;
         isAttacking = false;
+        isBlocking = false;
         controlsLocked = false;
         isGrounded = false;
         _fellOutThisLife = false;

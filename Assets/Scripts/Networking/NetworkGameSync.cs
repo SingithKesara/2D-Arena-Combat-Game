@@ -79,9 +79,10 @@ public class NetworkGameSync : NetworkBehaviour
         }
     }
 
-    private void OnDestroy()
+    public override void OnDestroy()
     {
         if (Instance == this) Instance = null;
+        base.OnDestroy();
     }
 
     // ───── Server side: GSM events → NetworkVariables / ClientRpc ──────────────

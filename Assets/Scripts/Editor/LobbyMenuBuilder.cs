@@ -211,7 +211,7 @@ public static class LobbyMenuBuilder
         TextMeshProUGUI textArea = CreateLabel(fieldGO.transform, "Text", string.Empty, 26, FontStyles.Normal);
         textArea.alignment = TextAlignmentOptions.Left;
         textArea.color = Color.white;
-        textArea.enableWordWrapping = false;
+        textArea.textWrappingMode = TextWrappingModes.NoWrap;
         textArea.overflowMode = TextOverflowModes.Ellipsis;
         Stretch(textArea.rectTransform, 16f, 6f);
         field.textComponent = textArea;
@@ -220,7 +220,7 @@ public static class LobbyMenuBuilder
         TextMeshProUGUI placeholderText = CreateLabel(fieldGO.transform, "Placeholder", placeholder, 26, FontStyles.Italic);
         placeholderText.alignment = TextAlignmentOptions.Left;
         placeholderText.color = new Color(1f, 1f, 1f, 0.4f);
-        placeholderText.enableWordWrapping = false;
+        placeholderText.textWrappingMode = TextWrappingModes.NoWrap;
         placeholderText.overflowMode = TextOverflowModes.Ellipsis;
         Stretch(placeholderText.rectTransform, 16f, 6f);
         field.placeholder = placeholderText;

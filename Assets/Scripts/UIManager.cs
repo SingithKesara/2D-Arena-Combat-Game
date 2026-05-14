@@ -76,7 +76,7 @@ public class UIManager : MonoBehaviour
     {
         if (healthManagerP1 == null || healthManagerP2 == null)
         {
-            var all = FindObjectsByType<HealthManager>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            var all = FindObjectsByType<HealthManager>(FindObjectsInactive.Exclude);
             foreach (var hm in all)
             {
                 var pc = hm.GetComponent<PlayerController>();
@@ -89,6 +89,11 @@ public class UIManager : MonoBehaviour
 
         SetupFillImage(healthFillP1);
         SetupFillImage(healthFillP2);
+
+        // Hide the legacy nameplate sprites — the white-on-white text was invisible and just
+        // showed a plain white rectangle above each health bar.
+        HideIfPresent("P1_NamePlate");
+        HideIfPresent("P2_NamePlate");
 
         _healthLagP1 = CreateLagBar(healthFillP1, "LagFill_P1");
         _healthLagP2 = CreateLagBar(healthFillP2, "LagFill_P2");
@@ -348,6 +353,13 @@ public class UIManager : MonoBehaviour
             hpTextP2.text = current.ToString();
     }
 
+    private static void HideIfPresent(string objectName)
+    {
+        GameObject go = GameObject.Find(objectName);
+        if (go != null)
+            go.SetActive(false);
+    }
+
     private static void SetupFillImage(Image img)
     {
         if (img == null) return;
@@ -510,11 +522,13 @@ public class UIManager : MonoBehaviour
 
     private void RefreshScore(int p1, int p2)
     {
+        // Use simple ASCII so the score renders even when the font atlas doesn't include
+        // the U+25CF / U+25CB filled-circle glyphs.
         if (p1ScoreText != null)
-            p1ScoreText.text = new string('●', p1) + new string('○', Mathf.Max(0, 2 - p1));
+            p1ScoreText.text = $"WINS: {p1} / 2";
 
         if (p2ScoreText != null)
-            p2ScoreText.text = new string('○', Mathf.Max(0, 2 - p2)) + new string('●', p2);
+            p2ScoreText.text = $"WINS: {p2} / 2";
     }
 
     private void OnRoundStart()

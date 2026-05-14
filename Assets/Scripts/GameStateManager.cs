@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -252,12 +253,30 @@ public class GameStateManager : MonoBehaviour
     public void RestartMatch()
     {
         if (!isNetworkAuthority) return;
+
+        // If we're hosting and the opponent has left, there's no one to rematch against —
+        // shut the session down and return to main menu instead of starting an empty round.
+        if (NetworkManager.Singleton != null &&
+            NetworkManager.Singleton.IsServer &&
+            NetworkManager.Singleton.ConnectedClientsList.Count < 2)
+        {
+            if (ArenaNetworkManager.Instance != null)
+                ArenaNetworkManager.Instance.Shutdown();
+
+            SceneManager.LoadScene("MainMenu");
+            return;
+        }
+
         StopAllCoroutines();
         _p1Wins = 0;
         _p2Wins = 0;
         _currentRound = 1;
         _roundEndStarted = false;
         _matchStarted = true;
+
+        // Push the cleared scoreboard to the UI (and to clients via NetworkGameSync).
+        OnScoreUpdate?.Invoke(_p1Wins, _p2Wins);
+
         StartCoroutine(DoRoundIntro());
     }
 
@@ -287,6 +306,7 @@ public class GameStateManager : MonoBehaviour
 
     private void ResetPlayers()
     {
+        // Server (or local play) resets its local copy first so server's view starts at spawn.
         if (player1 != null && spawnP1 != null)
         {
             player1.ResetForNewRound(spawnP1.position);
@@ -297,6 +317,26 @@ public class GameStateManager : MonoBehaviour
         {
             player2.ResetForNewRound(spawnP2.position);
             player2.GetComponent<HealthManager>()?.ResetHealth();
+        }
+
+        // Networked: also send a ClientRpc so each player's OWNER resets their authoritative
+        // transform. NetworkTransform is in Owner mode for Player 2, so the server's local
+        // position write above wouldn't propagate to the client without this.
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        {
+            if (player1 != null && spawnP1 != null)
+            {
+                NetworkPlayer np1 = player1.GetComponent<NetworkPlayer>();
+                if (np1 != null && np1.IsSpawned)
+                    np1.ResetForNewRoundClientRpc(spawnP1.position);
+            }
+
+            if (player2 != null && spawnP2 != null)
+            {
+                NetworkPlayer np2 = player2.GetComponent<NetworkPlayer>();
+                if (np2 != null && np2.IsSpawned)
+                    np2.ResetForNewRoundClientRpc(spawnP2.position);
+            }
         }
 
         if (player1 != null && player2 != null)

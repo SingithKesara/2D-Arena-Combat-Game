@@ -39,6 +39,7 @@ public class CombatSystem : MonoBehaviour
     private HealthManager _health;
     private Animator _anim;
     private Coroutine _activeAttack;
+    private int _lastSelfHealth = -1;
 
     private static readonly int H_LightAttack = Animator.StringToHash("lightAttack");
     private static readonly int H_HeavyAttack = Animator.StringToHash("heavyAttack");
@@ -48,7 +49,6 @@ public class CombatSystem : MonoBehaviour
         _pc = GetComponent<PlayerController>();
         _health = GetComponent<HealthManager>();
         _anim = GetComponent<Animator>();
-
         ApplyProfile();
     }
 
@@ -85,43 +85,22 @@ public class CombatSystem : MonoBehaviour
     public void DoLightAttack()
     {
         if (!CanAttack()) return;
-
         _activeAttack = StartCoroutine(AttackRoutine(
-            lightDamage,
-            lightAttackRadius,
-            lightKnockback,
-            lightStartup,
-            lightCooldown,
-            H_LightAttack,
-            isHeavy: false
-        ));
+            lightDamage, lightAttackRadius, lightKnockback,
+            lightStartup, lightCooldown, H_LightAttack, isHeavy: false));
     }
 
     public void DoHeavyAttack()
     {
         if (!CanAttack()) return;
-
         _activeAttack = StartCoroutine(AttackRoutine(
-            heavyDamage,
-            heavyAttackRadius,
-            heavyKnockback,
-            heavyStartup,
-            heavyCooldown,
-            H_HeavyAttack,
-            isHeavy: true
-        ));
+            heavyDamage, heavyAttackRadius, heavyKnockback,
+            heavyStartup, heavyCooldown, H_HeavyAttack, isHeavy: true));
     }
-
-    private int _lastSelfHealth = -1;
 
     private void OnSelfHealthChanged(int current, int max)
     {
-        if (_lastSelfHealth < 0)
-        {
-            _lastSelfHealth = current;
-            return;
-        }
-
+        if (_lastSelfHealth < 0) { _lastSelfHealth = current; return; }
         bool tookDamage = current < _lastSelfHealth;
         _lastSelfHealth = current;
 
@@ -129,9 +108,7 @@ public class CombatSystem : MonoBehaviour
         {
             StopCoroutine(_activeAttack);
             _activeAttack = null;
-
-            if (_pc != null)
-                _pc.isAttacking = false;
+            if (_pc != null) _pc.isAttacking = false;
         }
     }
 
@@ -142,9 +119,8 @@ public class CombatSystem : MonoBehaviour
         if (_pc.isAttacking) return false;
         if (_pc.controlsLocked) return false;
 
-        // The MatchState is only authoritatively known on the server. On the client,
-        // skip this check and trust the server-side damage RPC to be rejected if the
-        // round isn't actually live.
+        // MatchState is only authoritatively known on the server; clients trust the damage RPC
+        // to be rejected if the round isn't actually live.
         GameStateManager gsm = GameStateManager.Instance;
         if (gsm != null && gsm.isNetworkAuthority &&
             gsm.State != GameStateManager.MatchState.Fighting)
@@ -153,14 +129,22 @@ public class CombatSystem : MonoBehaviour
         return true;
     }
 
-    private IEnumerator AttackRoutine(
-        int damage,
-        float radius,
-        float knockbackForce,
-        float startup,
-        float cooldown,
-        int animHash,
-        bool isHeavy)
+    private bool CanAttackDuringActiveFrame()
+    {
+        if (_pc == null) return false;
+        if (_pc.isDead) return false;
+        if (_pc.controlsLocked) return false;
+
+        GameStateManager gsm = GameStateManager.Instance;
+        if (gsm != null && gsm.isNetworkAuthority &&
+            gsm.State != GameStateManager.MatchState.Fighting)
+            return false;
+
+        return true;
+    }
+
+    private IEnumerator AttackRoutine(int damage, float radius, float knockbackForce,
+        float startup, float cooldown, int animHash, bool isHeavy)
     {
         _pc.isAttacking = true;
 
@@ -180,37 +164,15 @@ public class CombatSystem : MonoBehaviour
 
         yield return new WaitForSeconds(cooldown);
 
-        if (_pc != null)
-            _pc.isAttacking = false;
-
+        if (_pc != null) _pc.isAttacking = false;
         _activeAttack = null;
-    }
-
-    private bool CanAttackDuringActiveFrame()
-    {
-        if (_pc == null) return false;
-        if (_pc.isDead) return false;
-        if (_pc.controlsLocked) return false;
-
-        GameStateManager gsm = GameStateManager.Instance;
-        if (gsm != null && gsm.isNetworkAuthority &&
-            gsm.State != GameStateManager.MatchState.Fighting)
-            return false;
-
-        return true;
     }
 
     private void PerformHitCheck(int damage, float radius, float knockbackForce, bool isHeavy)
     {
         if (attackPoint == null) return;
-        // We let any side run the hit check (so the attacking client gets local feedback);
-        // damage application itself is gated to the server inside the loop below.
 
-        Collider2D[] hits = Physics2D.OverlapCircleAll(
-            attackPoint.position,
-            radius,
-            playerLayer
-        );
+        Collider2D[] hits = Physics2D.OverlapCircleAll(attackPoint.position, radius, playerLayer);
 
         foreach (Collider2D hit in hits)
         {
@@ -218,25 +180,25 @@ public class CombatSystem : MonoBehaviour
 
             HealthManager hm = hit.GetComponent<HealthManager>();
             if (hm == null) continue;
-
             if (hm.IsInvincible) continue;
 
             Vector2 dir = (hit.transform.position - transform.position).normalized;
-
             if (Mathf.Abs(dir.x) < 0.1f)
                 dir.x = transform.localScale.x >= 0f ? 1f : -1f;
+            Vector2 knockback = new Vector2(dir.x * knockbackForce, knockbackForce * upwardBias);
 
-            Vector2 knockback = new Vector2(
-                dir.x * knockbackForce,
-                knockbackForce * upwardBias
-            );
-
-            // Apply damage authoritatively. On the server we can call directly;
-            // on a client we send a ServerRpc so the host applies the damage.
+            // Damage routing:
+            //   - Offline / Local 1v1 (NetworkManager not running): apply directly on this side.
+            //   - Online server (host): apply directly, NetworkVariable syncs HP to client.
+            //   - Online client: send ServerRpc so the host applies authoritatively.
+            bool isNetworkRunning = Unity.Netcode.NetworkManager.Singleton != null &&
+                                    Unity.Netcode.NetworkManager.Singleton.IsListening;
             bool isServer = Unity.Netcode.NetworkManager.Singleton != null &&
                             Unity.Netcode.NetworkManager.Singleton.IsServer;
+            bool isLocalSession = ArenaNetworkManager.Instance == null ||
+                                  ArenaNetworkManager.Instance.CurrentMode == ArenaNetworkManager.SessionMode.Local;
 
-            if (isServer)
+            if (!isNetworkRunning || isLocalSession || isServer)
             {
                 hm.TakeDamage(damage, knockback);
             }
@@ -272,10 +234,8 @@ public class CombatSystem : MonoBehaviour
     private void OnDrawGizmosSelected()
     {
         if (attackPoint == null) return;
-
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(attackPoint.position, lightAttackRadius);
-
         Gizmos.color = Color.blue;
         Gizmos.DrawWireSphere(attackPoint.position, heavyAttackRadius);
     }

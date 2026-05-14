@@ -43,6 +43,12 @@ public class ArenaManager : MonoBehaviour
         if (t == null) return;
         if (t.position.y >= deathZoneY) return;
 
+        // Skip if the round isn't actively fighting — avoids killing players during the
+        // intro/respawn/round-end window where they may be briefly off-stage.
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.State != GameStateManager.MatchState.Fighting)
+            return;
+
         PlayerController pc = t.GetComponent<PlayerController>();
         if (pc == null || pc.isDead) return;
 

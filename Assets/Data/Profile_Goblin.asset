@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 31795292796588a42a0d56777a5bd870, type: 3}
+  m_Name: Profile_Goblin
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProfile
+  displayName: Snikt the Goblin
+  portrait: {fileID: -1162062500, guid: 4df532e8241c2d04a8cc9ce18931ffa4, type: 3}
+  walkSpeed: 7
+  runSpeed: 11
+  jumpForce: 15
+  fastFallForce: 22
+  maxFallSpeed: -28
+  lightDamage: 9
+  heavyDamage: 22
+  lightAttackRadius: 0.65
+  heavyAttackRadius: 1.05
+  lightKnockback: 7
+  heavyKnockback: 16
+  upwardBias: 0.4
+  lightStartup: 0.08
+  lightCooldown: 0.22
+  heavyStartup: 0.16
+  heavyCooldown: 0.38
+  maxHealth: 110
+  iFrameDuration: 0.25
+  animatorController: {fileID: 9100000, guid: 2fc12679321c2e346955f33bf2f8462e, type: 2}
+  colliderSize: {x: 0.5, y: 0.85}
+  colliderOffset: {x: 0, y: -0.02}
+  visualYOffset: -0.4
+  attackPointOffset: {x: 0.7, y: 0.1}
+  visualScale: {x: 1.6, y: 1.6, z: 1}
